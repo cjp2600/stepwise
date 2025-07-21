@@ -173,19 +173,30 @@ func (r *WorkflowRunner) printWorkflowResults(filePath string, results []workflo
 	for _, result := range results {
 		duration += int(result.Duration.Milliseconds())
 
-		if result.Status == "passed" {
-			fmt.Printf("%s %s (%dms)\n",
-				r.colors.Green("✓"),
-				r.colors.Bold(result.Name),
-				int(result.Duration.Milliseconds()))
-			passed++
+		// Handle repeat results
+		if result.RepeatCount > 0 {
+			r.printRepeatResults(result)
+			if result.Status == "passed" {
+				passed++
+			} else {
+				failed++
+			}
 		} else {
-			fmt.Printf("%s %s (%dms) - %s\n",
-				r.colors.Red("✗"),
-				r.colors.Bold(result.Name),
-				int(result.Duration.Milliseconds()),
-				r.colors.Red(result.Error))
-			failed++
+			// Regular step result
+			if result.Status == "passed" {
+				fmt.Printf("%s %s (%dms)\n",
+					r.colors.Green("✓"),
+					r.colors.Bold(result.Name),
+					int(result.Duration.Milliseconds()))
+				passed++
+			} else {
+				fmt.Printf("%s %s (%dms) - %s\n",
+					r.colors.Red("✗"),
+					r.colors.Bold(result.Name),
+					int(result.Duration.Milliseconds()),
+					r.colors.Red(result.Error))
+				failed++
+			}
 		}
 	}
 
@@ -194,6 +205,52 @@ func (r *WorkflowRunner) printWorkflowResults(filePath string, results []workflo
 		r.colors.Green(fmt.Sprintf("%d", passed)),
 		r.colors.Red(fmt.Sprintf("%d", failed)),
 		duration)
+}
+
+// printRepeatResults prints results for a repeated step
+func (r *WorkflowRunner) printRepeatResults(result workflow.TestResult) {
+	fmt.Printf("%s %s (repeat: %d iterations)\n",
+		r.colors.Blue("🔄"),
+		r.colors.Bold(result.Name),
+		result.RepeatCount)
+
+	repeatPassed := 0
+	repeatFailed := 0
+
+	for i, repeatResult := range result.RepeatResults {
+		statusIcon := r.colors.Green("✓")
+		if repeatResult.Status != "passed" {
+			statusIcon = r.colors.Red("✗")
+			repeatFailed++
+		} else {
+			repeatPassed++
+		}
+
+		fmt.Printf("  %s %s (iteration %d) (%dms)\n",
+			statusIcon,
+			r.colors.Dim(repeatResult.Name),
+			i+1,
+			int(repeatResult.Duration.Milliseconds()))
+
+		if repeatResult.Error != "" {
+			fmt.Printf("    %s %s\n",
+				r.colors.Red("Error:"),
+				r.colors.Red(repeatResult.Error))
+		}
+	}
+
+	// Print repeat summary
+	repeatStatus := r.colors.Green("passed")
+	if repeatFailed > 0 {
+		repeatStatus = r.colors.Red("failed")
+	}
+
+	fmt.Printf("  %s: %s (%d/%d iterations %s)\n",
+		r.colors.Dim("Repeat Summary"),
+		repeatStatus,
+		repeatPassed,
+		result.RepeatCount,
+		r.colors.Dim("passed"))
 }
 
 // printSummary prints the overall summary

@@ -36,6 +36,15 @@ func (m *Manager) Get(key string) (interface{}, bool) {
 	return value, exists
 }
 
+// GetAll gets all variables
+func (m *Manager) GetAll() map[string]interface{} {
+	result := make(map[string]interface{})
+	for key, value := range m.variables {
+		result[key] = value
+	}
+	return result
+}
+
 // Substitute substitutes variables in a string
 func (m *Manager) Substitute(input string) (string, error) {
 	if input == "" {

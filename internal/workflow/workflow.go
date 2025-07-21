@@ -52,6 +52,15 @@ type Step struct {
 	Retry       int                         `yaml:"retry" json:"retry"`
 	RetryDelay  string                      `yaml:"retry_delay" json:"retry_delay"`
 	Timeout     string                      `yaml:"timeout" json:"timeout"`
+	Repeat      *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
+}
+
+// RepeatConfig represents configuration for repeating a step
+type RepeatConfig struct {
+	Count     int                    `yaml:"count" json:"count"`
+	Delay     string                 `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Parallel  bool                   `yaml:"parallel,omitempty" json:"parallel,omitempty"`
+	Variables map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`
 }
 
 // Request represents an HTTP or gRPC request
@@ -81,13 +90,15 @@ type Request struct {
 
 // TestResult represents the result of a test step
 type TestResult struct {
-	Name         string                        `json:"name"`
-	Status       string                        `json:"status"`
-	Duration     time.Duration                 `json:"duration"`
-	Error        string                        `json:"error,omitempty"`
-	Validations  []validation.ValidationResult `json:"validations,omitempty"`
-	CapturedData map[string]interface{}        `json:"captured_data,omitempty"`
-	Retries      int                           `json:"retries,omitempty"`
+	Name          string                        `json:"name"`
+	Status        string                        `json:"status"`
+	Duration      time.Duration                 `json:"duration"`
+	Error         string                        `json:"error,omitempty"`
+	Validations   []validation.ValidationResult `json:"validations,omitempty"`
+	CapturedData  map[string]interface{}        `json:"captured_data,omitempty"`
+	Retries       int                           `json:"retries,omitempty"`
+	RepeatResults []TestResult                  `json:"repeat_results,omitempty"`
+	RepeatCount   int                           `json:"repeat_count,omitempty"`
 }
 
 // GroupResult represents the result of a step group
@@ -198,7 +209,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 			}
 		}
 
-		if err := e.executeStep(&step, result); err != nil {
+		if err := e.executeStepWithRepeat(&step, result); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
 			e.logger.Error("Step execution failed", "step", step.Name, "error", err)
@@ -285,7 +296,7 @@ func (e *Executor) executeGroupSequential(group *StepGroup, groupResult *GroupRe
 			}
 		}
 
-		if err := e.executeStep(&step, result); err != nil {
+		if err := e.executeStepWithRepeat(&step, result); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
 			e.logger.Error("Step execution failed", "step", step.Name, "error", err)
@@ -326,7 +337,7 @@ func (e *Executor) executeGroupParallel(group *StepGroup, groupResult *GroupResu
 				}
 			}
 
-			if err := e.executeStep(&step, result); err != nil {
+			if err := e.executeStepWithRepeat(&step, result); err != nil {
 				result.Status = "failed"
 				result.Error = err.Error()
 				e.logger.Error("Step execution failed", "step", step.Name, "error", err)
@@ -391,6 +402,9 @@ func (e *Executor) evaluateCondition(condition string) bool {
 
 // executeStep executes a single step with retry logic
 func (e *Executor) executeStep(step *Step, result *TestResult) error {
+	if result.CapturedData == nil {
+		result.CapturedData = make(map[string]interface{})
+	}
 	startTime := time.Now()
 	maxRetries := step.Retry
 	if maxRetries == 0 {
@@ -546,6 +560,214 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 
 	result.Duration = time.Since(startTime)
 	return lastError
+}
+
+// executeStepWithRepeat executes a step with repeat configuration
+func (e *Executor) executeStepWithRepeat(step *Step, result *TestResult) error {
+	if step.Repeat == nil {
+		// No repeat configuration, execute normally
+		return e.executeStep(step, result)
+	}
+
+	repeatConfig := step.Repeat
+	result.RepeatCount = repeatConfig.Count
+	result.RepeatResults = make([]TestResult, 0, repeatConfig.Count)
+
+	e.logger.Info("Executing step with repeat",
+		"step", step.Name,
+		"count", repeatConfig.Count,
+		"parallel", repeatConfig.Parallel)
+
+	if repeatConfig.Parallel {
+		return e.executeStepRepeatParallel(step, result, repeatConfig)
+	} else {
+		return e.executeStepRepeatSequential(step, result, repeatConfig)
+	}
+}
+
+// executeStepRepeatSequential executes a step multiple times sequentially
+func (e *Executor) executeStepRepeatSequential(step *Step, result *TestResult, repeatConfig *RepeatConfig) error {
+	delay := e.parseTimeout(repeatConfig.Delay)
+
+	for i := 0; i < repeatConfig.Count; i++ {
+		e.logger.Debug("Executing repeat iteration",
+			"step", step.Name,
+			"iteration", i+1,
+			"total", repeatConfig.Count)
+
+		// Create a copy of the step for this iteration
+		stepCopy := *step
+
+		// Apply repeat variables if specified
+		if repeatConfig.Variables != nil || true {
+			// Create a temporary variable manager for this iteration
+			tempVarManager := variables.NewManager(e.logger)
+
+			// Copy current variables
+			for key, value := range e.varManager.GetAll() {
+				tempVarManager.Set(key, value)
+			}
+
+			// Автоматически добавляем iteration и index
+			tempVarManager.Set("iteration", i+1)
+			tempVarManager.Set("index", i)
+
+			// Apply repeat-specific variables
+			if repeatConfig.Variables != nil {
+				for key, value := range repeatConfig.Variables {
+					if strValue, ok := value.(string); ok {
+						strValue = strings.ReplaceAll(strValue, "{{index}}", strconv.Itoa(i))
+						strValue = strings.ReplaceAll(strValue, "{{iteration}}", strconv.Itoa(i+1))
+						tempVarManager.Set(key, strValue)
+					} else {
+						tempVarManager.Set(key, value)
+					}
+				}
+			}
+
+			// Temporarily replace the variable manager
+			originalVarManager := e.varManager
+			e.varManager = tempVarManager
+			defer func() { e.varManager = originalVarManager }()
+		}
+
+		// Execute the step
+		iterationResult := &TestResult{
+			Name:         fmt.Sprintf("%s (iteration %d)", step.Name, i+1),
+			CapturedData: make(map[string]interface{}),
+		}
+
+		err := e.executeStep(&stepCopy, iterationResult)
+		if err != nil {
+			iterationResult.Status = "failed"
+			iterationResult.Error = err.Error()
+		} else {
+			iterationResult.Status = "passed"
+		}
+
+		result.RepeatResults = append(result.RepeatResults, *iterationResult)
+
+		// Add delay between iterations (except for the last one)
+		if i < repeatConfig.Count-1 && delay > 0 {
+			e.logger.Debug("Waiting between iterations", "delay", delay)
+			time.Sleep(delay)
+		}
+	}
+
+	// Determine overall result
+	passedCount := 0
+	for _, repeatResult := range result.RepeatResults {
+		if repeatResult.Status == "passed" {
+			passedCount++
+		}
+	}
+
+	if passedCount == repeatConfig.Count {
+		result.Status = "passed"
+	} else {
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("%d/%d iterations failed", repeatConfig.Count-passedCount, repeatConfig.Count)
+	}
+
+	return nil
+}
+
+// executeStepRepeatParallel executes a step multiple times in parallel
+func (e *Executor) executeStepRepeatParallel(step *Step, result *TestResult, repeatConfig *RepeatConfig) error {
+	results := make([]TestResult, repeatConfig.Count)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for i := 0; i < repeatConfig.Count; i++ {
+		wg.Add(1)
+		go func(iteration int) {
+			defer wg.Done()
+
+			e.logger.Debug("Executing parallel repeat iteration",
+				"step", step.Name,
+				"iteration", iteration+1,
+				"total", repeatConfig.Count)
+
+			// Create a copy of the step for this iteration
+			stepCopy := *step
+
+			// Apply repeat variables if specified
+			if repeatConfig.Variables != nil {
+				// Create a temporary variable manager for this iteration
+				tempVarManager := variables.NewManager(e.logger)
+
+				// Copy current variables
+				mu.Lock()
+				for key, value := range e.varManager.GetAll() {
+					tempVarManager.Set(key, value)
+				}
+				mu.Unlock()
+
+				// Apply repeat-specific variables
+				for key, value := range repeatConfig.Variables {
+					// Replace {{index}} with current iteration index
+					if strValue, ok := value.(string); ok {
+						strValue = strings.ReplaceAll(strValue, "{{index}}", strconv.Itoa(iteration))
+						strValue = strings.ReplaceAll(strValue, "{{iteration}}", strconv.Itoa(iteration+1))
+						tempVarManager.Set(key, strValue)
+					} else {
+						tempVarManager.Set(key, value)
+					}
+				}
+
+				// Temporarily replace the variable manager
+				mu.Lock()
+				originalVarManager := e.varManager
+				e.varManager = tempVarManager
+				mu.Unlock()
+				defer func() {
+					mu.Lock()
+					e.varManager = originalVarManager
+					mu.Unlock()
+				}()
+			}
+
+			// Execute the step
+			iterationResult := &TestResult{
+				Name:         fmt.Sprintf("%s (iteration %d)", step.Name, iteration+1),
+				CapturedData: make(map[string]interface{}),
+			}
+
+			err := e.executeStep(&stepCopy, iterationResult)
+			if err != nil {
+				iterationResult.Status = "failed"
+				iterationResult.Error = err.Error()
+			} else {
+				iterationResult.Status = "passed"
+			}
+
+			mu.Lock()
+			results[iteration] = *iterationResult
+			mu.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Collect results
+	result.RepeatResults = results
+
+	// Determine overall result
+	passedCount := 0
+	for _, repeatResult := range result.RepeatResults {
+		if repeatResult.Status == "passed" {
+			passedCount++
+		}
+	}
+
+	if passedCount == repeatConfig.Count {
+		result.Status = "passed"
+	} else {
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("%d/%d iterations failed", repeatConfig.Count-passedCount, repeatConfig.Count)
+	}
+
+	return nil
 }
 
 // initializeVariables initializes the variable manager with workflow variables
