@@ -6,11 +6,19 @@ import (
 	"fmt"
 	"time"
 
+	"bytes"
+	"encoding/json"
+
 	"github.com/cjp2600/stepwise/internal/logger"
+	"github.com/fullstorydev/grpcurl"
+	"github.com/jhump/protoreflect/desc"
+	"github.com/jhump/protoreflect/grpcreflect"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
+
+	"github.com/jhump/protoreflect/dynamic"
 )
 
 // Client represents a gRPC client for making requests
@@ -75,57 +83,87 @@ func (c *Client) Execute(req *Request) (*Response, error) {
 	defer cancel()
 
 	// Add metadata if provided
+	var headers []string
 	if len(req.Metadata) > 0 {
-		md := metadata.New(nil)
 		for key, value := range req.Metadata {
-			md.Set(key, value)
+			headers = append(headers, key+":"+value)
 		}
-		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
 
-	// Mock gRPC service responses for testing
-	var responseData interface{}
+	// Reflection client
+	rc := grpcreflect.NewClient(ctx, grpc_reflection_v1alpha.NewServerReflectionClient(c.conn))
+	descSource := grpcurl.DescriptorSourceFromServer(ctx, rc)
+	defer rc.Reset()
 
-	switch req.Service {
-	case "UserService":
-		switch req.Method {
-		case "GetUser":
-			// Mock user service response
-			responseData = map[string]interface{}{
-				"user_id": req.Data.(map[string]interface{})["user_id"],
-				"name":    "John Doe",
-				"email":   "john.doe@example.com",
-				"status":  "active",
-			}
-		default:
-			return nil, fmt.Errorf("unknown method %s for service %s", req.Method, req.Service)
+	methodName := req.Service + "." + req.Method
+	c.logger.Debug("Looking up method", "method", methodName)
+
+	mDesc, err := descSource.FindSymbol(methodName)
+	if err != nil {
+		c.logger.Debug("Method lookup failed", "error", err)
+		return nil, fmt.Errorf("failed to find method %s: %w", methodName, err)
+	}
+	method, ok := mDesc.(*desc.MethodDescriptor)
+	if !ok {
+		return nil, fmt.Errorf("symbol %s is not a method", methodName)
+	}
+
+	inputType := method.GetInputType()
+	c.logger.Debug("Input type", "fullName", inputType.GetFullyQualifiedName())
+
+	// Marshal req.Data to JSON и затем в dynamic.Message
+	jsonData, err := json.Marshal(req.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal data: %w", err)
+	}
+	msg := dynamic.NewMessage(inputType)
+	if err := msg.UnmarshalJSON(jsonData); err != nil {
+		c.logger.Debug("UnmarshalJSON error", "error", err)
+		return nil, fmt.Errorf("failed to unmarshal data to proto: %w", err)
+	}
+
+	// Prepare metadata
+	md := make(map[string]string)
+	for _, h := range headers {
+		parts := bytes.SplitN([]byte(h), []byte{':'}, 2)
+		if len(parts) == 2 {
+			md[string(parts[0])] = string(parts[1])
 		}
-	case "OrderService":
-		switch req.Method {
-		case "CreateOrder":
-			// Mock order service response
-			responseData = map[string]interface{}{
-				"order_id":     "ORD-12345",
-				"user_id":      req.Data.(map[string]interface{})["user_id"],
-				"status":       "created",
-				"total_amount": req.Data.(map[string]interface{})["total_amount"],
-				"items":        req.Data.(map[string]interface{})["items"],
-			}
-		default:
-			return nil, fmt.Errorf("unknown method %s for service %s", req.Method, req.Service)
-		}
-	default:
-		return nil, fmt.Errorf("unknown service %s", req.Service)
+	}
+
+	// Prepare output message
+	outputType := method.GetOutputType()
+	outMsg := dynamic.NewMessage(outputType)
+
+	c.logger.Debug("Invoking gRPC method", "method", methodName)
+	fullMethod := fmt.Sprintf("/%s/%s", req.Service, req.Method)
+	c.logger.Debug("Full gRPC method path", "fullMethod", fullMethod)
+	err = c.conn.Invoke(ctx, fullMethod, msg, outMsg)
+	if err != nil {
+		c.logger.Debug("Invoke error", "error", err)
+		return nil, fmt.Errorf("gRPC invoke error: %w", err)
+	}
+
+	// Marshal response to JSON
+	jsonResp, err := outMsg.MarshalJSON()
+	if err != nil {
+		c.logger.Debug("MarshalJSON error", "error", err)
+		return nil, fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	var respData map[string]interface{}
+	if err := json.Unmarshal(jsonResp, &respData); err != nil {
+		c.logger.Debug("Unmarshal error", "error", err)
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	duration := time.Since(start)
-
 	response := &Response{
-		Data:       responseData,
+		Data:       respData,
 		Metadata:   make(map[string][]string),
 		Duration:   duration,
 		Status:     "OK",
-		StatusCode: 0, // gRPC OK status
+		StatusCode: 0,
 	}
 
 	c.logger.Debug("Received gRPC response",
