@@ -1,0 +1,91 @@
+name: "Simple API Test"
+version: "1.0"
+description: "A simple test to demonstrate Stepwise functionality"
+
+variables:
+  base_url: "https://httpbin.org"
+  timeout: "10s"
+
+steps:
+  - name: "Get Request Test"
+    description: "Test a simple GET request"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.url"
+        contains: "httpbin.org"
+      - time: "< 5000ms"
+    capture:
+      response_url: "$.url"
+
+  - name: "Post Request Test"
+    description: "Test a POST request with JSON body"
+    request:
+      method: "POST"
+      url: "{{base_url}}/post"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      body:
+        message: "Hello from Stepwise"
+        timestamp: "{{faker.date}}"
+        random_id: "{{faker.uuid}}"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.json.message"
+        equals: "Hello from Stepwise"
+      - json: "$.json.random_id"
+        type: "string"
+      - time: "< 5000ms"
+    capture:
+      response_id: "$.json.random_id"
+
+  - name: "JSON Response Test"
+    description: "Test JSON response validation"
+    request:
+      method: "GET"
+      url: "{{base_url}}/json"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.slideshow"
+        type: "object"
+      - json: "$.slideshow.author"
+        type: "string"
+      - time: "< 3000ms"
+
+  - name: "Status Code Test"
+    description: "Test different status codes"
+    request:
+      method: "GET"
+      url: "{{base_url}}/status/404"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 404
+      - time: "< 3000ms"
+
+  - name: "Delay Test"
+    description: "Test response time validation"
+    request:
+      method: "GET"
+      url: "{{base_url}}/delay/1"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - time: "> 1000ms"
+      - time: "< 3000ms" 

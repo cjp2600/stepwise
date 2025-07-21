@@ -4,12 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/cjp2600/stepwise/internal/config"
+	httpclient "github.com/cjp2600/stepwise/internal/http"
 	"github.com/cjp2600/stepwise/internal/logger"
+	"github.com/cjp2600/stepwise/internal/validation"
+	"github.com/cjp2600/stepwise/internal/variables"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,16 +25,29 @@ type Workflow struct {
 	Description string                 `yaml:"description" json:"description"`
 	Variables   map[string]interface{} `yaml:"variables" json:"variables"`
 	Steps       []Step                 `yaml:"steps" json:"steps"`
+	Groups      []StepGroup            `yaml:"groups" json:"groups"`
+}
+
+// StepGroup represents a group of steps that can be executed together
+type StepGroup struct {
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+	Parallel    bool   `yaml:"parallel" json:"parallel"`
+	Condition   string `yaml:"condition" json:"condition"`
+	Steps       []Step `yaml:"steps" json:"steps"`
 }
 
 // Step represents a single test step
 type Step struct {
-	Name        string            `yaml:"name" json:"name"`
-	Description string            `yaml:"description" json:"description"`
-	Request     Request           `yaml:"request" json:"request"`
-	Validate    []Validation      `yaml:"validate" json:"validate"`
-	Capture     map[string]string `yaml:"capture" json:"capture"`
-	Condition   string            `yaml:"condition" json:"condition"`
+	Name        string                      `yaml:"name" json:"name"`
+	Description string                      `yaml:"description" json:"description"`
+	Request     Request                     `yaml:"request" json:"request"`
+	Validate    []validation.ValidationRule `yaml:"validate" json:"validate"`
+	Capture     map[string]string           `yaml:"capture" json:"capture"`
+	Condition   string                      `yaml:"condition" json:"condition"`
+	Retry       int                         `yaml:"retry" json:"retry"`
+	RetryDelay  string                      `yaml:"retry_delay" json:"retry_delay"`
+	Timeout     string                      `yaml:"timeout" json:"timeout"`
 }
 
 // Request represents an HTTP request
@@ -40,57 +58,47 @@ type Request struct {
 	Body    interface{}       `yaml:"body" json:"body"`
 	Query   map[string]string `yaml:"query" json:"query"`
 	Timeout string            `yaml:"timeout" json:"timeout"`
-}
-
-// Validation represents a validation rule
-type Validation struct {
-	Status   int         `yaml:"status" json:"status"`
-	JSON     string      `yaml:"json" json:"json"`
-	XML      string      `yaml:"xml" json:"xml"`
-	Time     string      `yaml:"time" json:"time"`
-	Equals   interface{} `yaml:"equals" json:"equals"`
-	Contains string      `yaml:"contains" json:"contains"`
-	Type     string      `yaml:"type" json:"type"`
-	Greater  interface{} `yaml:"greater" json:"greater"`
-	Less     interface{} `yaml:"less" json:"less"`
-	Pattern  string      `yaml:"pattern" json:"pattern"`
-	Custom   string      `yaml:"custom" json:"custom"`
-	Value    string      `yaml:"value" json:"value"`
+	Auth    *httpclient.Auth  `yaml:"auth" json:"auth"`
 }
 
 // TestResult represents the result of a test step
 type TestResult struct {
-	Name        string             `json:"name"`
-	Status      string             `json:"status"`
-	Duration    time.Duration      `json:"duration"`
-	Error       string             `json:"error,omitempty"`
-	Validations []ValidationResult `json:"validations,omitempty"`
+	Name         string                        `json:"name"`
+	Status       string                        `json:"status"`
+	Duration     time.Duration                 `json:"duration"`
+	Error        string                        `json:"error,omitempty"`
+	Validations  []validation.ValidationResult `json:"validations,omitempty"`
+	CapturedData map[string]interface{}        `json:"captured_data,omitempty"`
+	Retries      int                           `json:"retries,omitempty"`
 }
 
-// ValidationResult represents the result of a validation
-type ValidationResult struct {
-	Type     string      `json:"type"`
-	Expected interface{} `json:"expected"`
-	Actual   interface{} `json:"actual"`
-	Passed   bool        `json:"passed"`
-	Error    string      `json:"error,omitempty"`
+// GroupResult represents the result of a step group
+type GroupResult struct {
+	Name     string        `json:"name"`
+	Status   string        `json:"status"`
+	Duration time.Duration `json:"duration"`
+	Results  []TestResult  `json:"results"`
+	Error    string        `json:"error,omitempty"`
+	Parallel bool          `json:"parallel"`
 }
 
 // Executor executes workflows
 type Executor struct {
-	config *config.Config
-	logger *logger.Logger
-	client *http.Client
+	config     *config.Config
+	logger     *logger.Logger
+	client     *httpclient.Client
+	validator  *validation.Validator
+	varManager *variables.Manager
 }
 
 // NewExecutor creates a new workflow executor
 func NewExecutor(cfg *config.Config, log *logger.Logger) *Executor {
 	return &Executor{
-		config: cfg,
-		logger: log,
-		client: &http.Client{
-			Timeout: cfg.Timeout,
-		},
+		config:     cfg,
+		logger:     log,
+		client:     httpclient.NewClient(cfg.Timeout, log),
+		validator:  validation.NewValidator(log),
+		varManager: variables.NewManager(log),
 	}
 }
 
@@ -125,51 +133,435 @@ func Load(filename string) (*Workflow, error) {
 	return &workflow, nil
 }
 
-// Execute executes a workflow and returns results
+// Execute executes a workflow and returns the results
 func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
-	e.logger.Info("Executing workflow", "name", wf.Name, "steps", len(wf.Steps))
+	e.logger.Info("Starting workflow execution", "name", wf.Name)
+	startTime := time.Now()
 
-	var results []TestResult
+	// Initialize variables
+	e.initializeVariables(wf.Variables)
 
-	for i, step := range wf.Steps {
-		e.logger.Info("Executing step", "name", step.Name, "index", i+1)
+	var allResults []TestResult
 
-		start := time.Now()
-		result := TestResult{
-			Name:     step.Name,
-			Status:   "passed",
-			Duration: 0,
+	// Execute individual steps
+	for _, step := range wf.Steps {
+		result := &TestResult{
+			Name:         step.Name,
+			Status:       "pending",
+			CapturedData: make(map[string]interface{}),
 		}
 
-		// Execute the step
-		if err := e.executeStep(&step, wf.Variables); err != nil {
+		// Check condition if specified
+		if step.Condition != "" {
+			if !e.evaluateCondition(step.Condition) {
+				e.logger.Info("Skipping step due to condition", "step", step.Name, "condition", step.Condition)
+				result.Status = "skipped"
+				allResults = append(allResults, *result)
+				continue
+			}
+		}
+
+		if err := e.executeStep(&step, result); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
+			e.logger.Error("Step execution failed", "step", step.Name, "error", err)
+		} else {
+			result.Status = "passed"
 		}
 
-		result.Duration = time.Since(start)
-		results = append(results, result)
-
-		e.logger.Info("Step completed",
-			"name", step.Name,
-			"status", result.Status,
-			"duration", result.Duration)
+		allResults = append(allResults, *result)
 	}
 
-	return results, nil
+	// Execute step groups
+	for _, group := range wf.Groups {
+		groupResult := &GroupResult{
+			Name:     group.Name,
+			Status:   "pending",
+			Parallel: group.Parallel,
+		}
+
+		// Check condition if specified
+		if group.Condition != "" {
+			if !e.evaluateCondition(group.Condition) {
+				e.logger.Info("Skipping group due to condition", "group", group.Name, "condition", group.Condition)
+				groupResult.Status = "skipped"
+				// Convert group result to test results
+				for _, step := range group.Steps {
+					allResults = append(allResults, TestResult{
+						Name:   fmt.Sprintf("%s.%s", group.Name, step.Name),
+						Status: "skipped",
+					})
+				}
+				continue
+			}
+		}
+
+		groupStartTime := time.Now()
+		if err := e.executeGroup(&group, groupResult); err != nil {
+			groupResult.Status = "failed"
+			groupResult.Error = err.Error()
+			e.logger.Error("Group execution failed", "group", group.Name, "error", err)
+		} else {
+			groupResult.Status = "passed"
+		}
+		groupResult.Duration = time.Since(groupStartTime)
+
+		// Add group results to all results
+		for _, result := range groupResult.Results {
+			result.Name = fmt.Sprintf("%s.%s", group.Name, result.Name)
+			allResults = append(allResults, result)
+		}
+	}
+
+	totalDuration := time.Since(startTime)
+	e.logger.Info("Workflow execution completed", "duration", totalDuration, "total_steps", len(allResults))
+
+	return allResults, nil
 }
 
-// executeStep executes a single step
-func (e *Executor) executeStep(step *Step, variables map[string]interface{}) error {
-	// TODO: Implement variable substitution
-	// TODO: Implement request execution
-	// TODO: Implement validation
-	// TODO: Implement capture
+// executeGroup executes a group of steps, either sequentially or in parallel
+func (e *Executor) executeGroup(group *StepGroup, groupResult *GroupResult) error {
+	e.logger.Info("Executing step group", "group", group.Name, "parallel", group.Parallel, "steps", len(group.Steps))
 
-	e.logger.Debug("Executing step", "name", step.Name, "method", step.Request.Method, "url", step.Request.URL)
+	if group.Parallel {
+		return e.executeGroupParallel(group, groupResult)
+	}
+	return e.executeGroupSequential(group, groupResult)
+}
 
-	// For now, just simulate execution
-	time.Sleep(100 * time.Millisecond)
+// executeGroupSequential executes steps in a group sequentially
+func (e *Executor) executeGroupSequential(group *StepGroup, groupResult *GroupResult) error {
+	for _, step := range group.Steps {
+		result := &TestResult{
+			Name:         step.Name,
+			Status:       "pending",
+			CapturedData: make(map[string]interface{}),
+		}
+
+		// Check condition if specified
+		if step.Condition != "" {
+			if !e.evaluateCondition(step.Condition) {
+				e.logger.Info("Skipping step due to condition", "step", step.Name, "condition", step.Condition)
+				result.Status = "skipped"
+				groupResult.Results = append(groupResult.Results, *result)
+				continue
+			}
+		}
+
+		if err := e.executeStep(&step, result); err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			e.logger.Error("Step execution failed", "step", step.Name, "error", err)
+		} else {
+			result.Status = "passed"
+		}
+
+		groupResult.Results = append(groupResult.Results, *result)
+	}
 
 	return nil
+}
+
+// executeGroupParallel executes steps in a group in parallel
+func (e *Executor) executeGroupParallel(group *StepGroup, groupResult *GroupResult) error {
+	var wg sync.WaitGroup
+	results := make([]*TestResult, len(group.Steps))
+	errors := make(chan error, len(group.Steps))
+
+	for i, step := range group.Steps {
+		wg.Add(1)
+		go func(stepIndex int, step Step) {
+			defer wg.Done()
+
+			result := &TestResult{
+				Name:         step.Name,
+				Status:       "pending",
+				CapturedData: make(map[string]interface{}),
+			}
+
+			// Check condition if specified
+			if step.Condition != "" {
+				if !e.evaluateCondition(step.Condition) {
+					e.logger.Info("Skipping step due to condition", "step", step.Name, "condition", step.Condition)
+					result.Status = "skipped"
+					results[stepIndex] = result
+					return
+				}
+			}
+
+			if err := e.executeStep(&step, result); err != nil {
+				result.Status = "failed"
+				result.Error = err.Error()
+				e.logger.Error("Step execution failed", "step", step.Name, "error", err)
+				errors <- err
+			} else {
+				result.Status = "passed"
+			}
+
+			results[stepIndex] = result
+		}(i, step)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for any errors
+	select {
+	case err := <-errors:
+		return err
+	default:
+		// No errors
+	}
+
+	// Add results to group result
+	for _, result := range results {
+		if result != nil {
+			groupResult.Results = append(groupResult.Results, *result)
+		}
+	}
+
+	return nil
+}
+
+// evaluateCondition evaluates a condition expression
+func (e *Executor) evaluateCondition(condition string) bool {
+	// Simple condition evaluation - can be extended for more complex logic
+	// For now, we'll support basic variable checks
+	if strings.HasPrefix(condition, "{{") && strings.HasSuffix(condition, "}}") {
+		// Extract variable name
+		varName := strings.TrimSpace(condition[2 : len(condition)-2])
+		value, exists := e.varManager.Get(varName)
+
+		// Check if variable exists and has a truthy value
+		if exists && value != nil {
+			switch v := value.(type) {
+			case bool:
+				return v
+			case string:
+				return v != "" && v != "false" && v != "0"
+			case int, int32, int64, float32, float64:
+				return v != 0
+			default:
+				return value != nil
+			}
+		}
+		return false
+	}
+
+	// For now, assume condition is true if it's not a variable reference
+	return true
+}
+
+// executeStep executes a single step with retry logic
+func (e *Executor) executeStep(step *Step, result *TestResult) error {
+	startTime := time.Now()
+	maxRetries := step.Retry
+	if maxRetries == 0 {
+		maxRetries = 1 // Default to 1 attempt
+	}
+
+	var lastError error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			result.Retries = attempt
+			retryDelay := e.parseTimeout(step.RetryDelay)
+			if retryDelay > 0 {
+				e.logger.Info("Retrying step", "step", step.Name, "attempt", attempt+1, "delay", retryDelay)
+				time.Sleep(retryDelay)
+			}
+		}
+
+		// Substitute variables in request
+		substitutedReq, err := e.substituteRequestVariables(&step.Request)
+		if err != nil {
+			lastError = fmt.Errorf("variable substitution failed: %w", err)
+			continue
+		}
+
+		// Execute HTTP request
+		response, err := e.client.Execute(&httpclient.Request{
+			Method:  substitutedReq.Method,
+			URL:     substitutedReq.URL,
+			Headers: substitutedReq.Headers,
+			Body:    substitutedReq.Body,
+			Query:   substitutedReq.Query,
+			Timeout: e.parseTimeout(substitutedReq.Timeout),
+			Auth:    substitutedReq.Auth,
+		})
+
+		if err != nil {
+			lastError = fmt.Errorf("HTTP request failed: %w", err)
+			continue
+		}
+
+		// Run validations
+		var validationErrors []string
+		if len(step.Validate) > 0 {
+			validationResults, err := e.validator.Validate(response, step.Validate)
+			if err != nil {
+				validationErrors = append(validationErrors, err.Error())
+			} else {
+				for _, validationResult := range validationResults {
+					if !validationResult.Passed {
+						validationErrors = append(validationErrors, validationResult.Error)
+					}
+				}
+			}
+		}
+
+		if len(validationErrors) > 0 {
+			lastError = fmt.Errorf("validation failed: %s", strings.Join(validationErrors, "; "))
+			continue
+		}
+
+		// Capture values if specified
+		if step.Capture != nil {
+			if err := e.captureValues(response, step.Capture, result); err != nil {
+				e.logger.Warn("Failed to capture values", "step", step.Name, "error", err)
+			}
+		}
+
+		// Success - no need to retry
+		result.Duration = time.Since(startTime)
+		return nil
+	}
+
+	result.Duration = time.Since(startTime)
+	return lastError
+}
+
+// initializeVariables initializes the variable manager with workflow variables
+func (e *Executor) initializeVariables(vars map[string]interface{}) {
+	for key, value := range vars {
+		e.varManager.Set(key, value)
+	}
+}
+
+// substituteRequestVariables substitutes variables in the request
+func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
+	substituted := &Request{
+		Method:  req.Method,
+		URL:     req.URL,
+		Headers: make(map[string]string),
+		Body:    req.Body,
+		Query:   make(map[string]string),
+		Timeout: req.Timeout,
+	}
+
+	// Substitute URL
+	if substitutedURL, err := e.varManager.Substitute(req.URL); err != nil {
+		return nil, fmt.Errorf("failed to substitute URL: %w", err)
+	} else {
+		substituted.URL = substitutedURL
+	}
+
+	// Substitute headers
+	for key, value := range req.Headers {
+		if substitutedValue, err := e.varManager.Substitute(value); err != nil {
+			return nil, fmt.Errorf("failed to substitute header %s: %w", key, err)
+		} else {
+			substituted.Headers[key] = substitutedValue
+		}
+	}
+
+	// Substitute query parameters
+	for key, value := range req.Query {
+		if substitutedValue, err := e.varManager.Substitute(value); err != nil {
+			return nil, fmt.Errorf("failed to substitute query %s: %w", key, err)
+		} else {
+			substituted.Query[key] = substitutedValue
+		}
+	}
+
+	// Substitute body
+	if req.Body != nil {
+		switch body := req.Body.(type) {
+		case string:
+			if substitutedBody, err := e.varManager.Substitute(body); err != nil {
+				return nil, fmt.Errorf("failed to substitute body: %w", err)
+			} else {
+				substituted.Body = substitutedBody
+			}
+		case map[string]interface{}:
+			if substitutedBody, err := e.varManager.SubstituteMap(body); err != nil {
+				return nil, fmt.Errorf("failed to substitute body: %w", err)
+			} else {
+				substituted.Body = substitutedBody
+			}
+		default:
+			substituted.Body = req.Body
+		}
+	}
+
+	return substituted, nil
+}
+
+// captureValues captures values from the response
+func (e *Executor) captureValues(response *httpclient.Response, captures map[string]string, result *TestResult) error {
+	jsonData, err := response.GetJSONBody()
+	if err != nil {
+		return fmt.Errorf("failed to parse response as JSON: %w", err)
+	}
+
+	for captureKey, jsonPath := range captures {
+		value, err := e.extractJSONValue(jsonData, jsonPath)
+		if err != nil {
+			e.logger.Warn("Failed to capture value", "key", captureKey, "path", jsonPath, "error", err)
+			continue
+		}
+
+		result.CapturedData[captureKey] = value
+		e.varManager.Set(captureKey, value)
+		e.logger.Debug("Captured value", "key", captureKey, "value", value)
+	}
+
+	return nil
+}
+
+// extractJSONValue extracts a value from JSON data using JSONPath-like syntax
+func (e *Executor) extractJSONValue(data interface{}, path string) (interface{}, error) {
+	// Simple JSONPath-like extraction
+	// For now, handle basic cases like "$.key" or "$[0]"
+	if path == "$" {
+		return data, nil
+	}
+
+	if strings.HasPrefix(path, "$.") {
+		key := strings.TrimPrefix(path, "$.")
+		if mapData, ok := data.(map[string]interface{}); ok {
+			if value, exists := mapData[key]; exists {
+				return value, nil
+			}
+		}
+		return nil, fmt.Errorf("key not found: %s", key)
+	}
+
+	if strings.HasPrefix(path, "$[") && strings.HasSuffix(path, "]") {
+		indexStr := strings.TrimPrefix(strings.TrimSuffix(path, "]"), "$[")
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid array index: %s", indexStr)
+		}
+		if arrayData, ok := data.([]interface{}); ok {
+			if index >= 0 && index < len(arrayData) {
+				return arrayData[index], nil
+			}
+		}
+		return nil, fmt.Errorf("array index out of bounds: %d", index)
+	}
+
+	return nil, fmt.Errorf("unsupported JSON path: %s", path)
+}
+
+// parseTimeout parses a timeout string into duration
+func (e *Executor) parseTimeout(timeoutStr string) time.Duration {
+	if timeoutStr == "" {
+		return e.config.Timeout
+	}
+
+	if duration, err := time.ParseDuration(timeoutStr); err == nil {
+		return duration
+	}
+
+	return e.config.Timeout
 }

@@ -1,0 +1,184 @@
+name: "Performance Testing Workflow"
+version: "1.0"
+description: "Demonstrates performance testing capabilities including load testing and stress testing"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  api_key: "${API_KEY}"
+
+steps:
+  - name: "Baseline Performance Test"
+    description: "Single request to establish baseline performance"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+      headers:
+        Content-Type: "application/json"
+    validate:
+      - status: 200
+      - time: "< 1000ms"
+
+performance_tests:
+  - name: "Load Test - Posts API"
+    description: "Load test the posts API endpoint"
+    load_test:
+      concurrency: 10
+      duration: "30s"
+      rate: 50  # 50 requests per second
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts/1"
+        headers:
+          Content-Type: "application/json"
+    thresholds:
+      max_response_time: "500ms"
+      min_requests_per_second: 40.0
+      max_error_rate: 5.0
+
+  - name: "Load Test - Users API"
+    description: "Load test the users API endpoint"
+    load_test:
+      concurrency: 5
+      duration: "20s"
+      rate: 30  # 30 requests per second
+      request:
+        method: "GET"
+        url: "{{base_url}}/users/1"
+        headers:
+          Content-Type: "application/json"
+    thresholds:
+      max_response_time: "300ms"
+      min_requests_per_second: 25.0
+      max_error_rate: 2.0
+
+  - name: "Stress Test - Posts API"
+    description: "Stress test to find breaking point"
+    stress_test:
+      initial_concurrency: 5
+      max_concurrency: 50
+      step_duration: "10s"
+      step_increase: 5
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts/1"
+        headers:
+          Content-Type: "application/json"
+
+  - name: "Load Test - POST Request"
+    description: "Load test POST requests with data"
+    load_test:
+      concurrency: 8
+      duration: "25s"
+      rate: 20  # 20 requests per second
+      request:
+        method: "POST"
+        url: "{{base_url}}/posts"
+        headers:
+          Content-Type: "application/json"
+        body:
+          title: "{{faker.sentence}}"
+          body: "{{faker.paragraph}}"
+          userId: "{{faker.number(1, 10)}}"
+    thresholds:
+      max_response_time: "800ms"
+      min_requests_per_second: 15.0
+      max_error_rate: 10.0
+
+  - name: "Concurrent API Tests"
+    description: "Test multiple endpoints concurrently"
+    load_test:
+      concurrency: 15
+      duration: "40s"
+      rate: 60  # 60 requests per second
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts/{{faker.number(1, 100)}}"
+        headers:
+          Content-Type: "application/json"
+    thresholds:
+      max_response_time: "600ms"
+      min_requests_per_second: 50.0
+      max_error_rate: 8.0
+
+  - name: "Authentication Load Test"
+    description: "Load test with authentication (if available)"
+    load_test:
+      concurrency: 6
+      duration: "15s"
+      rate: 25  # 25 requests per second
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts/1"
+        headers:
+          Content-Type: "application/json"
+        auth:
+          type: "api_key"
+          api_key: "{{api_key}}"
+          api_key_in: "header"
+    thresholds:
+      max_response_time: "400ms"
+      min_requests_per_second: 20.0
+      max_error_rate: 3.0
+
+  - name: "Mixed Workload Test"
+    description: "Test mixed GET and POST requests"
+    load_test:
+      concurrency: 12
+      duration: "35s"
+      rate: 40  # 40 requests per second
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts/{{faker.number(1, 100)}}"
+        headers:
+          Content-Type: "application/json"
+    thresholds:
+      max_response_time: "700ms"
+      min_requests_per_second: 35.0
+      max_error_rate: 7.0
+
+  - name: "High Concurrency Stress Test"
+    description: "High concurrency stress test"
+    stress_test:
+      initial_concurrency: 10
+      max_concurrency: 100
+      step_duration: "15s"
+      step_increase: 10
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts/1"
+        headers:
+          Content-Type: "application/json"
+
+  - name: "Database Query Load Test"
+    description: "Load test with query parameters"
+    load_test:
+      concurrency: 7
+      duration: "20s"
+      rate: 35  # 35 requests per second
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts"
+        query:
+          userId: "{{faker.number(1, 10)}}"
+        headers:
+          Content-Type: "application/json"
+    thresholds:
+      max_response_time: "600ms"
+      min_requests_per_second: 30.0
+      max_error_rate: 5.0
+
+  - name: "Error Rate Test"
+    description: "Test error handling under load"
+    load_test:
+      concurrency: 10
+      duration: "30s"
+      rate: 50  # 50 requests per second
+      request:
+        method: "GET"
+        url: "{{base_url}}/posts/999999"  # Non-existent post
+        headers:
+          Content-Type: "application/json"
+    thresholds:
+      max_response_time: "500ms"
+      min_requests_per_second: 45.0
+      max_error_rate: 95.0  # Expect high error rate for non-existent resource 

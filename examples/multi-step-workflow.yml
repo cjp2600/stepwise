@@ -1,0 +1,216 @@
+name: "Multi-Step API Testing Workflow"
+version: "1.0"
+description: "Demonstrates advanced workflow features including parallel execution, conditional steps, and retry logic"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  api_key: "${API_KEY}"
+  user_id: "{{faker.number(1, 10)}}"
+  post_id: "{{faker.number(1, 100)}}"
+
+steps:
+  - name: "Setup Test Data"
+    description: "Initialize test data and variables"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/{{user_id}}"
+      headers:
+        Content-Type: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        type: "number"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email"
+
+  - name: "Check User Exists"
+    description: "Verify user data is valid"
+    condition: "{{user_name}}"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/{{user_id}}"
+      headers:
+        Content-Type: "application/json"
+    validate:
+      - status: 200
+      - json: "$.name"
+        equals: "{{user_name}}"
+
+groups:
+  - name: "Parallel API Tests"
+    description: "Execute multiple API calls in parallel"
+    parallel: true
+    steps:
+      - name: "Get User Posts"
+        description: "Fetch user posts"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts?userId={{user_id}}"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - json: "$"
+            type: "array"
+        capture:
+          post_count: "$.length()"
+          first_post_id: "$.[0].id"
+
+      - name: "Get User Albums"
+        description: "Fetch user albums"
+        request:
+          method: "GET"
+          url: "{{base_url}}/albums?userId={{user_id}}"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - json: "$"
+            type: "array"
+        capture:
+          album_count: "$.length()"
+
+      - name: "Get User Todos"
+        description: "Fetch user todos"
+        request:
+          method: "GET"
+          url: "{{base_url}}/todos?userId={{user_id}}"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - json: "$"
+            type: "array"
+        capture:
+          todo_count: "$.length()"
+
+  - name: "Sequential Data Processing"
+    description: "Process data sequentially with dependencies"
+    parallel: false
+    condition: "{{post_count}}"
+    steps:
+      - name: "Get Post Details"
+        description: "Fetch detailed post information"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts/{{first_post_id}}"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - json: "$.userId"
+            equals: "{{user_id}}"
+        capture:
+          post_title: "$.title"
+          post_body: "$.body"
+
+      - name: "Get Post Comments"
+        description: "Fetch comments for the post"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts/{{first_post_id}}/comments"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - json: "$"
+            type: "array"
+        capture:
+          comment_count: "$.length()"
+
+      - name: "Create Test Comment"
+        description: "Create a new comment on the post"
+        request:
+          method: "POST"
+          url: "{{base_url}}/posts/{{first_post_id}}/comments"
+          headers:
+            Content-Type: "application/json"
+          body:
+            name: "{{faker.name}}"
+            email: "{{faker.email}}"
+            body: "{{faker.sentence}}"
+        validate:
+          - status: 201
+          - json: "$.postId"
+            equals: "{{first_post_id}}"
+        retry: 3
+        retry_delay: "1s"
+
+  - name: "Load Testing Group"
+    description: "Simulate load testing with parallel requests"
+    parallel: true
+    steps:
+      - name: "Load Test 1"
+        description: "First load test request"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts/1"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - time: "< 1000ms"
+        timeout: "5s"
+
+      - name: "Load Test 2"
+        description: "Second load test request"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts/2"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - time: "< 1000ms"
+        timeout: "5s"
+
+      - name: "Load Test 3"
+        description: "Third load test request"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts/3"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - time: "< 1000ms"
+        timeout: "5s"
+
+  - name: "Conditional Tests"
+    description: "Tests that run based on conditions"
+    parallel: false
+    steps:
+      - name: "Conditional Test 1"
+        description: "This test runs if user has posts"
+        condition: "{{post_count}}"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts/{{first_post_id}}"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+
+      - name: "Conditional Test 2"
+        description: "This test runs if user has albums"
+        condition: "{{album_count}}"
+        request:
+          method: "GET"
+          url: "{{base_url}}/albums/1"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+
+      - name: "Always Run Test"
+        description: "This test always runs"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/1"
+          headers:
+            Content-Type: "application/json"
+        validate:
+          - status: 200
+          - json: "$.id"
+            equals: 1 

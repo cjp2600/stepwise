@@ -1,0 +1,244 @@
+name: "Authentication Testing Workflow"
+version: "1.0"
+description: "Demonstrates various authentication methods for API testing"
+
+variables:
+  base_url: "https://httpbin.org"
+  api_key: "${API_KEY}"
+  bearer_token: "${BEARER_TOKEN}"
+  username: "${USERNAME}"
+  password: "${PASSWORD}"
+
+steps:
+  - name: "Basic Authentication Test"
+    description: "Test Basic Authentication"
+    request:
+      method: "GET"
+      url: "{{base_url}}/basic-auth/{{username}}/{{password}}"
+      headers:
+        Content-Type: "application/json"
+      auth:
+        type: "basic"
+        username: "{{username}}"
+        password: "{{password}}"
+    validate:
+      - status: 200
+      - json: "$.authenticated"
+        equals: true
+      - json: "$.user"
+        equals: "{{username}}"
+
+  - name: "Bearer Token Test"
+    description: "Test Bearer Token Authentication"
+    request:
+      method: "GET"
+      url: "{{base_url}}/bearer"
+      headers:
+        Content-Type: "application/json"
+      auth:
+        type: "bearer"
+        token: "{{bearer_token}}"
+    validate:
+      - status: 200
+      - json: "$.authenticated"
+        equals: true
+      - json: "$.token"
+        equals: "{{bearer_token}}"
+
+  - name: "API Key Header Test"
+    description: "Test API Key in Header"
+    request:
+      method: "GET"
+      url: "{{base_url}}/headers"
+      headers:
+        Content-Type: "application/json"
+      auth:
+        type: "api_key"
+        api_key: "{{api_key}}"
+        api_key_in: "header"
+    validate:
+      - status: 200
+      - json: "$.headers.X-Api-Key"
+        equals: "{{api_key}}"
+
+  - name: "API Key Query Test"
+    description: "Test API Key in Query Parameters"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+      query:
+        api_key: "{{api_key}}"
+      headers:
+        Content-Type: "application/json"
+      auth:
+        type: "api_key"
+        api_key: "{{api_key}}"
+        api_key_in: "query"
+    validate:
+      - status: 200
+      - json: "$.args.api_key"
+        equals: "{{api_key}}"
+
+  - name: "Custom Authentication Test"
+    description: "Test Custom Authentication Headers"
+    request:
+      method: "GET"
+      url: "{{base_url}}/headers"
+      headers:
+        Content-Type: "application/json"
+      auth:
+        type: "custom"
+        custom:
+          X-Custom-Auth: "custom-token-123"
+          X-User-ID: "{{faker.number(1, 1000)}}"
+          X-Session-ID: "{{faker.uuid}}"
+    validate:
+      - status: 200
+      - json: "$.headers.X-Custom-Auth"
+        equals: "custom-token-123"
+
+groups:
+  - name: "OAuth Testing"
+    description: "Test OAuth 2.0 Authentication (requires OAuth server)"
+    parallel: false
+    steps:
+      - name: "OAuth Client Credentials Test"
+        description: "Test OAuth with client credentials grant"
+        request:
+          method: "GET"
+          url: "https://api.example.com/protected-resource"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "oauth"
+            oauth:
+              client_id: "${OAUTH_CLIENT_ID}"
+              client_secret: "${OAUTH_CLIENT_SECRET}"
+              token_url: "https://auth.example.com/oauth/token"
+              scope: "read write"
+              grant_type: "client_credentials"
+        validate:
+          - status: 200
+        retry: 2
+        retry_delay: "2s"
+
+      - name: "OAuth Password Grant Test"
+        description: "Test OAuth with password grant"
+        request:
+          method: "GET"
+          url: "https://api.example.com/user-profile"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "oauth"
+            oauth:
+              client_id: "${OAUTH_CLIENT_ID}"
+              client_secret: "${OAUTH_CLIENT_SECRET}"
+              token_url: "https://auth.example.com/oauth/token"
+              scope: "read"
+              grant_type: "password"
+              username: "${OAUTH_USERNAME}"
+              password: "${OAUTH_PASSWORD}"
+        validate:
+          - status: 200
+        retry: 2
+        retry_delay: "2s"
+
+  - name: "Authentication Load Test"
+    description: "Load test with authentication"
+    parallel: true
+    steps:
+      - name: "Authenticated Request 1"
+        description: "First authenticated load test request"
+        request:
+          method: "GET"
+          url: "{{base_url}}/bearer"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "bearer"
+            token: "{{bearer_token}}"
+        validate:
+          - status: 200
+          - time: "< 1000ms"
+        timeout: "5s"
+
+      - name: "Authenticated Request 2"
+        description: "Second authenticated load test request"
+        request:
+          method: "GET"
+          url: "{{base_url}}/headers"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "api_key"
+            api_key: "{{api_key}}"
+            api_key_in: "header"
+        validate:
+          - status: 200
+          - time: "< 1000ms"
+        timeout: "5s"
+
+      - name: "Authenticated Request 3"
+        description: "Third authenticated load test request"
+        request:
+          method: "GET"
+          url: "{{base_url}}/basic-auth/{{username}}/{{password}}"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "basic"
+            username: "{{username}}"
+            password: "{{password}}"
+        validate:
+          - status: 200
+          - time: "< 1000ms"
+        timeout: "5s"
+
+  - name: "Conditional Authentication Tests"
+    description: "Tests that run based on authentication availability"
+    parallel: false
+    steps:
+      - name: "Bearer Token Available Test"
+        description: "This test runs if bearer token is available"
+        condition: "{{bearer_token}}"
+        request:
+          method: "GET"
+          url: "{{base_url}}/bearer"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "bearer"
+            token: "{{bearer_token}}"
+        validate:
+          - status: 200
+
+      - name: "API Key Available Test"
+        description: "This test runs if API key is available"
+        condition: "{{api_key}}"
+        request:
+          method: "GET"
+          url: "{{base_url}}/headers"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "api_key"
+            api_key: "{{api_key}}"
+            api_key_in: "header"
+        validate:
+          - status: 200
+
+      - name: "Basic Auth Available Test"
+        description: "This test runs if basic auth credentials are available"
+        condition: "{{username}}"
+        request:
+          method: "GET"
+          url: "{{base_url}}/basic-auth/{{username}}/{{password}}"
+          headers:
+            Content-Type: "application/json"
+          auth:
+            type: "basic"
+            username: "{{username}}"
+            password: "{{password}}"
+        validate:
+          - status: 200 
