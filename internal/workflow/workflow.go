@@ -43,16 +43,18 @@ type StepGroup struct {
 
 // Step represents a single test step
 type Step struct {
-	Name        string                      `yaml:"name" json:"name"`
-	Description string                      `yaml:"description" json:"description"`
-	Request     Request                     `yaml:"request" json:"request"`
-	Validate    []validation.ValidationRule `yaml:"validate" json:"validate"`
-	Capture     map[string]string           `yaml:"capture" json:"capture"`
-	Condition   string                      `yaml:"condition" json:"condition"`
-	Retry       int                         `yaml:"retry" json:"retry"`
-	RetryDelay  string                      `yaml:"retry_delay" json:"retry_delay"`
-	Timeout     string                      `yaml:"timeout" json:"timeout"`
-	Repeat      *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
+	Name         string                      `yaml:"name" json:"name"`
+	ShowResponse bool                        `yaml:"show_response,omitempty" json:"show_response,omitempty"`
+	Use          string                      `yaml:"use,omitempty" json:"use,omitempty"`
+	Description  string                      `yaml:"description" json:"description"`
+	Request      Request                     `yaml:"request" json:"request"`
+	Validate     []validation.ValidationRule `yaml:"validate" json:"validate"`
+	Capture      map[string]string           `yaml:"capture" json:"capture"`
+	Condition    string                      `yaml:"condition" json:"condition"`
+	Retry        int                         `yaml:"retry" json:"retry"`
+	RetryDelay   string                      `yaml:"retry_delay" json:"retry_delay"`
+	Timeout      string                      `yaml:"timeout" json:"timeout"`
+	Repeat       *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
 }
 
 // RepeatConfig represents configuration for repeating a step
@@ -189,10 +191,36 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	// Initialize variables
 	e.initializeVariables(wf.Variables)
 
+	// Execute individual steps
+	// Собираем карту компонент по имени (только step-компоненты)
+	componentMap := make(map[string]Step)
+	for _, imp := range wf.Imports {
+		importManager := NewImportManager(nil)
+		component, err := importManager.LoadComponent(imp.Path)
+		if err == nil && component.Type == "step" && len(component.Steps) == 1 {
+			componentMap[component.Name] = component.Steps[0]
+		}
+	}
+
 	var allResults []TestResult
 
-	// Execute individual steps
 	for _, step := range wf.Steps {
+		// Если step.Use задан, ищем компонент и подменяем step
+		if step.Use != "" {
+			if compStep, ok := componentMap[step.Use]; ok {
+				// Копируем параметры из компонента в step, кроме Name/Use/Validate/Capture (их можно переопределять)
+				// Вместо step.Request == (Request{}) сравниваем по признаку пустого метода и URL
+				if step.Request.Method == "" && step.Request.URL == "" {
+					step.Request = compStep.Request
+				}
+				if len(step.Validate) == 0 {
+					step.Validate = compStep.Validate
+				}
+				if len(step.Capture) == 0 {
+					step.Capture = compStep.Capture
+				}
+			}
+		}
 		result := &TestResult{
 			Name:         step.Name,
 			Status:       "pending",
@@ -543,13 +571,41 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 						Body:       jsonData,
 						Duration:   grpcResponse.Duration,
 					}
+					// DEBUG: печатаем jsonData
+					fmt.Println("[DEBUG] gRPC response for capture:", string(jsonData))
 					captureErr = e.captureValues(mockResponse, step.Capture, result)
 				}
 			} else {
+				// DEBUG: печатаем httpResponse.Body
+				if httpResponse != nil {
+					fmt.Println("[DEBUG] HTTP response for capture:", string(httpResponse.Body))
+				}
 				captureErr = e.captureValues(httpResponse, step.Capture, result)
 			}
 			if captureErr != nil {
 				e.logger.Warn("Failed to capture values", "step", step.Name, "error", captureErr)
+			}
+		}
+
+		// После capture/validate, если step.ShowResponse, печатаем тело ответа
+		if step.ShowResponse {
+			if substitutedReq.Protocol == "grpc" {
+				if grpcResponse != nil {
+					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (gRPC) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else {
+				if httpResponse != nil && len(httpResponse.Body) > 0 {
+					fmt.Println("================ RESPONSE ================")
+					fmt.Println(string(httpResponse.Body))
+					fmt.Println("================ END RESPONSE ================")
+				} else {
+					fmt.Println("[DEBUG] httpResponse.Body is empty or nil")
+				}
 			}
 		}
 
@@ -900,14 +956,22 @@ func (e *Executor) extractJSONValue(data interface{}, path string) (interface{},
 		return data, nil
 	}
 
+	// Поддержка вложенных ключей: $.a.b.c
 	if strings.HasPrefix(path, "$.") {
-		key := strings.TrimPrefix(path, "$.")
-		if mapData, ok := data.(map[string]interface{}); ok {
-			if value, exists := mapData[key]; exists {
-				return value, nil
+		keys := strings.Split(strings.TrimPrefix(path, "$."), ".")
+		current := data
+		for _, key := range keys {
+			if mapData, ok := current.(map[string]interface{}); ok {
+				if value, exists := mapData[key]; exists {
+					current = value
+				} else {
+					return nil, fmt.Errorf("key not found: %s", key)
+				}
+			} else {
+				return nil, fmt.Errorf("not a map at: %s", key)
 			}
 		}
-		return nil, fmt.Errorf("key not found: %s", key)
+		return current, nil
 	}
 
 	if strings.HasPrefix(path, "$[") && strings.HasSuffix(path, "]") {
