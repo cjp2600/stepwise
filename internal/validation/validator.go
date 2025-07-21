@@ -21,23 +21,24 @@ type Validator struct {
 
 // ValidationRule represents a validation rule
 type ValidationRule struct {
-	Status   int         `yaml:"status" json:"status"`
-	JSON     string      `yaml:"json" json:"json"`
-	XML      string      `yaml:"xml" json:"xml"`
-	Time     string      `yaml:"time" json:"time"`
-	Equals   interface{} `yaml:"equals" json:"equals"`
-	Contains string      `yaml:"contains" json:"contains"`
-	Type     string      `yaml:"type" json:"type"`
-	Greater  interface{} `yaml:"greater" json:"greater"`
-	Less     interface{} `yaml:"less" json:"less"`
-	Pattern  string      `yaml:"pattern" json:"pattern"`
-	Custom   string      `yaml:"custom" json:"custom"`
-	Value    string      `yaml:"value" json:"value"`
-	Empty    *bool       `yaml:"empty,omitempty" json:"empty,omitempty"`   // true: must be empty, false: must not be empty
-	Nil      *bool       `yaml:"nil,omitempty" json:"nil,omitempty"`       // true: must be nil, false: must not be nil
-	Len      *int        `yaml:"len,omitempty" json:"len,omitempty"`       // length must be equal to this
-	Decode   string      `yaml:"decode,omitempty" json:"decode,omitempty"` // "base64json"
-	JSONPath string      `yaml:"jsonpath,omitempty" json:"jsonpath,omitempty"`
+	Status       int         `yaml:"status" json:"status"`
+	JSON         string      `yaml:"json" json:"json"`
+	XML          string      `yaml:"xml" json:"xml"`
+	Time         string      `yaml:"time" json:"time"`
+	Equals       interface{} `yaml:"equals" json:"equals"`
+	Contains     string      `yaml:"contains" json:"contains"`
+	Type         string      `yaml:"type" json:"type"`
+	Greater      interface{} `yaml:"greater" json:"greater"`
+	Less         interface{} `yaml:"less" json:"less"`
+	Pattern      string      `yaml:"pattern" json:"pattern"`
+	Custom       string      `yaml:"custom" json:"custom"`
+	Value        string      `yaml:"value" json:"value"`
+	Empty        *bool       `yaml:"empty,omitempty" json:"empty,omitempty"`   // true: must be empty, false: must not be empty
+	Nil          *bool       `yaml:"nil,omitempty" json:"nil,omitempty"`       // true: must be nil, false: must not be nil
+	Len          *int        `yaml:"len,omitempty" json:"len,omitempty"`       // length must be equal to this
+	Decode       string      `yaml:"decode,omitempty" json:"decode,omitempty"` // "base64json"
+	JSONPath     string      `yaml:"jsonpath,omitempty" json:"jsonpath,omitempty"`
+	PrintDecoded bool        `yaml:"print_decoded,omitempty" json:"print_decoded,omitempty"`
 }
 
 // ValidationResult represents the result of a validation
@@ -150,16 +151,46 @@ func (v *Validator) validateJSON(response *http.Response, rule ValidationRule) V
 		}
 	}
 
+	// Сначала извлекаем значение по rule.JSON
+	value, err := v.extractJSONValue(jsonData, rule.JSON)
+	if err != nil {
+		return ValidationResult{
+			Type:     "json",
+			Expected: rule.JSON,
+			Actual:   "extraction failed",
+			Passed:   false,
+			Error:    fmt.Sprintf("failed to extract value: %v", err),
+		}
+	}
+	jsonData = value
+
 	// Apply decode if needed
 	if rule.Decode == "base64json" {
+		v.logger.Debug("Type of jsonData for decode", "type", reflect.TypeOf(jsonData), "value", jsonData)
+		if jsonData == nil {
+			return ValidationResult{
+				Type:     "exists",
+				Expected: true,
+				Actual:   false,
+				Passed:   false,
+				Error:    "value is nil, cannot decode base64json",
+			}
+		}
 		strVal, ok := jsonData.(string)
+		if !ok {
+			// Попробовать []byte
+			if b, ok2 := jsonData.([]byte); ok2 {
+				strVal = string(b)
+				ok = true
+			}
+		}
 		if !ok {
 			return ValidationResult{
 				Type:     "decode",
 				Expected: "base64json",
 				Actual:   jsonData,
 				Passed:   false,
-				Error:    "value is not a string for base64json decode",
+				Error:    "value is not a string or []byte for base64json decode",
 			}
 		}
 		decoded, err := base64.StdEncoding.DecodeString(strVal)
@@ -182,6 +213,10 @@ func (v *Validator) validateJSON(response *http.Response, rule ValidationRule) V
 				Error:    "json decode error: " + err.Error(),
 			}
 		}
+		if rule.PrintDecoded {
+			pretty, _ := json.MarshalIndent(decodedJSON, "", "  ")
+			v.logger.Debug("Decoded base64json structure", "json", string(pretty))
+		}
 		jsonData = decodedJSON
 	}
 	// Apply jsonpath if needed
@@ -199,17 +234,7 @@ func (v *Validator) validateJSON(response *http.Response, rule ValidationRule) V
 		jsonData = val
 	}
 
-	// Extract value using JSONPath-like syntax
-	value, err := v.extractJSONValue(jsonData, rule.JSON)
-	if err != nil {
-		return ValidationResult{
-			Type:     "json",
-			Expected: rule.JSON,
-			Actual:   "extraction failed",
-			Passed:   false,
-			Error:    fmt.Sprintf("failed to extract value: %v", err),
-		}
-	}
+	value = jsonData
 
 	// Apply validation based on rule type
 	if rule.Nil != nil {
@@ -454,29 +479,44 @@ func (v *Validator) compareDuration(actual, expected time.Duration, rule string)
 }
 
 func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}, error) {
-	// Simple JSONPath-like extraction
-	// Handle cases like "$.key", "$.nested.key", "$[0]", "$.items[0]"
+	// Поддержка сложных путей с массивами: $.widgets[0].widget
 	if path == "$" {
 		return data, nil
 	}
 
 	if strings.HasPrefix(path, "$.") {
-		// Handle nested paths like "$.data.id" or "$.items[0]"
-		pathParts := strings.Split(strings.TrimPrefix(path, "$."), ".")
+		pathExpr := strings.TrimPrefix(path, "$.")
+		// Разбиваем путь на части с учётом индексов
+		var parts []string
+		var buf strings.Builder
+		inBracket := false
+		for _, r := range pathExpr {
+			if r == '.' && !inBracket {
+				parts = append(parts, buf.String())
+				buf.Reset()
+			} else {
+				if r == '[' {
+					inBracket = true
+				}
+				if r == ']' {
+					inBracket = false
+				}
+				buf.WriteRune(r)
+			}
+		}
+		if buf.Len() > 0 {
+			parts = append(parts, buf.String())
+		}
 		current := data
-
-		for i, part := range pathParts {
-			// Check if this part contains array access like "items[0]"
-			if strings.Contains(part, "[") && strings.Contains(part, "]") {
-				// Extract array name and index
+		for _, part := range parts {
+			// Массив с индексом: key[index]
+			if strings.Contains(part, "[") && strings.HasSuffix(part, "]") {
 				openBracket := strings.Index(part, "[")
 				closeBracket := strings.Index(part, "]")
-				arrayName := part[:openBracket]
+				key := part[:openBracket]
 				indexStr := part[openBracket+1 : closeBracket]
-
-				// Get the array
 				if mapData, ok := current.(map[string]interface{}); ok {
-					if array, exists := mapData[arrayName]; exists {
+					if array, exists := mapData[key]; exists {
 						if arrayData, ok := array.([]interface{}); ok {
 							index, err := strconv.Atoi(indexStr)
 							if err != nil {
@@ -485,19 +525,19 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 							if index >= 0 && index < len(arrayData) {
 								current = arrayData[index]
 							} else {
-								return nil, fmt.Errorf("array index out of bounds: %d", index)
+								return nil, nil // Пустой массив
 							}
 						} else {
-							return nil, fmt.Errorf("key %s is not an array", arrayName)
+							return nil, fmt.Errorf("key %s is not an array", key)
 						}
 					} else {
-						return nil, fmt.Errorf("key not found: %s", arrayName)
+						return nil, fmt.Errorf("key not found: %s", key)
 					}
 				} else {
 					return nil, fmt.Errorf("cannot access array on non-object")
 				}
 			} else {
-				// Simple key access
+				// Обычный ключ
 				if mapData, ok := current.(map[string]interface{}); ok {
 					if value, exists := mapData[part]; exists {
 						current = value
@@ -508,12 +548,8 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 					return nil, fmt.Errorf("cannot access key on non-object")
 				}
 			}
-
-			// If this is the last part, return the value
-			if i == len(pathParts)-1 {
-				return current, nil
-			}
 		}
+		return current, nil
 	}
 
 	if strings.HasPrefix(path, "$[") && strings.HasSuffix(path, "]") {
@@ -526,6 +562,7 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 			if index >= 0 && index < len(arrayData) {
 				return arrayData[index], nil
 			}
+			return nil, nil // Пустой массив
 		}
 		return nil, fmt.Errorf("array index out of bounds: %d", index)
 	}
