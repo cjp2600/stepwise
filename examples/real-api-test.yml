@@ -1,0 +1,231 @@
+name: "Real API Test Suite"
+version: "1.0"
+description: "Testing real public APIs to demonstrate Stepwise capabilities"
+
+variables:
+  jsonplaceholder_url: "https://jsonplaceholder.typicode.com"
+  httpbin_url: "https://httpbin.org"
+  timeout: "10s"
+
+steps:
+  - name: "JSONPlaceholder - Get Post"
+    description: "Test GET request to JSONPlaceholder API"
+    request:
+      method: "GET"
+      url: "{{jsonplaceholder_url}}/posts/1"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+      - json: "$.title"
+        type: "string"
+      - json: "$.body"
+        type: "string"
+      - json: "$.userId"
+        type: "number"
+      - time: "< 5000ms"
+    capture:
+      post_id: "$.id"
+      post_title: "$.title"
+      user_id: "$.userId"
+
+  - name: "JSONPlaceholder - Get All Posts"
+    description: "Test GET request to retrieve all posts"
+    request:
+      method: "GET"
+      url: "{{jsonplaceholder_url}}/posts"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+      - json: "$.length"
+        greater: 0
+      - json: "$[0].id"
+        type: "number"
+      - json: "$[0].title"
+        type: "string"
+      - time: "< 10000ms"
+
+  - name: "JSONPlaceholder - Create Post"
+    description: "Test POST request to create a new post"
+    request:
+      method: "POST"
+      url: "{{jsonplaceholder_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      body:
+        title: "Test Post from Stepwise"
+        body: "This is a test post created by Stepwise API testing framework"
+        userId: 1
+      timeout: "{{timeout}}"
+    validate:
+      - status: 201
+      - json: "$.id"
+        type: "number"
+      - json: "$.title"
+        equals: "Test Post from Stepwise"
+      - json: "$.body"
+        contains: "Stepwise"
+      - json: "$.userId"
+        equals: 1
+      - time: "< 5000ms"
+    capture:
+      new_post_id: "$.id"
+      new_post_title: "$.title"
+
+  - name: "JSONPlaceholder - Update Post"
+    description: "Test PUT request to update the created post"
+    request:
+      method: "PUT"
+      url: "{{jsonplaceholder_url}}/posts/{{new_post_id}}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      body:
+        id: "{{new_post_id}}"
+        title: "Updated: {{new_post_title}}"
+        body: "This post has been updated by Stepwise"
+        userId: 1
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: "{{new_post_id}}"
+      - json: "$.title"
+        contains: "Updated:"
+      - json: "$.body"
+        contains: "updated by Stepwise"
+      - time: "< 5000ms"
+
+  - name: "JSONPlaceholder - Delete Post"
+    description: "Test DELETE request to delete the post"
+    request:
+      method: "DELETE"
+      url: "{{jsonplaceholder_url}}/posts/{{new_post_id}}"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - time: "< 3000ms"
+
+  - name: "HTTPBin - Get Request"
+    description: "Test GET request to HTTPBin API"
+    request:
+      method: "GET"
+      url: "{{httpbin_url}}/get"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.url"
+        contains: "httpbin.org"
+      - json: "$.headers.User-Agent"
+        equals: "Stepwise-Test-Suite"
+      - time: "< 5000ms"
+
+  - name: "HTTPBin - Post Request"
+    description: "Test POST request to HTTPBin API"
+    request:
+      method: "POST"
+      url: "{{httpbin_url}}/post"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      body:
+        message: "Hello from Stepwise"
+        timestamp: "{{faker.date}}"
+        random_id: "{{faker.uuid}}"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.url"
+        contains: "httpbin.org"
+      - json: "$.json.message"
+        equals: "Hello from Stepwise"
+      - json: "$.json.random_id"
+        type: "string"
+      - time: "< 5000ms"
+
+  - name: "HTTPBin - Status Codes"
+    description: "Test various HTTP status codes"
+    request:
+      method: "GET"
+      url: "{{httpbin_url}}/status/404"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 404
+      - time: "< 3000ms"
+
+  - name: "HTTPBin - Delay Test"
+    description: "Test response time validation"
+    request:
+      method: "GET"
+      url: "{{httpbin_url}}/delay/2"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - time: "> 2000ms"
+      - time: "< 5000ms"
+
+  - name: "HTTPBin - JSON Response"
+    description: "Test JSON response validation"
+    request:
+      method: "GET"
+      url: "{{httpbin_url}}/json"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.slideshow"
+        type: "object"
+      - json: "$.slideshow.author"
+        type: "string"
+      - json: "$.slideshow.slides"
+        type: "array"
+      - time: "< 5000ms"
+
+# Error handling tests
+  - name: "Error Handling - Invalid URL"
+    description: "Test error handling with invalid URL"
+    request:
+      method: "GET"
+      url: "https://invalid-domain-that-does-not-exist-12345.com"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 0  # Expected to fail
+      - time: "< 10000ms"
+
+  - name: "Error Handling - Timeout"
+    description: "Test timeout handling"
+    request:
+      method: "GET"
+      url: "{{httpbin_url}}/delay/15"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "5s"
+    validate:
+      - status: 0  # Expected to timeout
+      - time: "< 10000ms" 

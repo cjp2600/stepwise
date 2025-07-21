@@ -1,0 +1,118 @@
+name: "Basic API Test Suite"
+version: "1.0"
+description: "A simple example workflow demonstrating Stepwise capabilities"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+
+steps:
+  - name: "Health Check"
+    description: "Verify the API is accessible"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+      timeout: "{{timeout}}"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+      - json: "$.title"
+        type: "string"
+      - json: "$.body"
+        type: "string"
+      - time: "< 2000ms"
+    capture:
+      post_id: "$.id"
+      post_title: "$.title"
+
+  - name: "Get All Posts"
+    description: "Retrieve all posts and validate structure"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      timeout: "{{timeout}}"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+      - json: "$.length"
+        greater: 0
+      - json: "$[0].id"
+        type: "number"
+      - json: "$[0].title"
+        type: "string"
+      - time: "< 3000ms"
+
+  - name: "Create Post"
+    description: "Create a new post with generated data"
+    request:
+      method: "POST"
+      url: "{{base_url}}/posts"
+      timeout: "{{timeout}}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        title: "{{faker.sentence}}"
+        body: "{{faker.paragraph}}"
+        userId: "{{faker.number(1, 10)}}"
+    validate:
+      - status: 201
+      - json: "$.id"
+        type: "number"
+      - json: "$.title"
+        type: "string"
+      - json: "$.body"
+        type: "string"
+      - json: "$.userId"
+        type: "number"
+    capture:
+      new_post_id: "$.id"
+      new_post_title: "$.title"
+
+  - name: "Update Post"
+    description: "Update the created post"
+    request:
+      method: "PUT"
+      url: "{{base_url}}/posts/{{new_post_id}}"
+      timeout: "{{timeout}}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        id: "{{new_post_id}}"
+        title: "Updated {{new_post_title}}"
+        body: "This post has been updated by Stepwise"
+        userId: "{{faker.number(1, 10)}}"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: "{{new_post_id}}"
+      - json: "$.title"
+        contains: "Updated"
+      - time: "< 2000ms"
+
+  - name: "Delete Post"
+    description: "Delete the created post"
+    request:
+      method: "DELETE"
+      url: "{{base_url}}/posts/{{new_post_id}}"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - time: "< 1500ms"
+
+  - name: "Error Handling Test"
+    description: "Test error handling with invalid request"
+    request:
+      method: "GET"
+      url: "{{base_url}}/nonexistent"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 404
+      - time: "< 2000ms" 

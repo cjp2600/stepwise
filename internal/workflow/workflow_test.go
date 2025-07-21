@@ -1,0 +1,172 @@
+package workflow
+
+import (
+	"os"
+	"testing"
+	"time"
+
+	"github.com/cjp2600/stepwise/internal/config"
+	"github.com/cjp2600/stepwise/internal/logger"
+)
+
+func TestLoadWorkflow(t *testing.T) {
+	// Create a temporary workflow file
+	content := `name: "Test Workflow"
+version: "1.0"
+description: "A test workflow"
+
+variables:
+  base_url: "https://api.example.com"
+
+steps:
+  - name: "Test Step"
+    request:
+      method: "GET"
+      url: "{{base_url}}/test"
+    validate:
+      - status: 200
+`
+
+	tmpfile, err := os.CreateTemp("", "workflow-*.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	tmpfile.Close()
+
+	// Test loading the workflow
+	wf, err := Load(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("Failed to load workflow: %v", err)
+	}
+
+	// Verify workflow properties
+	if wf.Name != "Test Workflow" {
+		t.Errorf("Expected name 'Test Workflow', got '%s'", wf.Name)
+	}
+
+	if wf.Version != "1.0" {
+		t.Errorf("Expected version '1.0', got '%s'", wf.Version)
+	}
+
+	if len(wf.Steps) != 1 {
+		t.Errorf("Expected 1 step, got %d", len(wf.Steps))
+	}
+
+	if wf.Steps[0].Name != "Test Step" {
+		t.Errorf("Expected step name 'Test Step', got '%s'", wf.Steps[0].Name)
+	}
+}
+
+func TestNewExecutor(t *testing.T) {
+	cfg := &config.Config{
+		Timeout: 30 * time.Second,
+	}
+	log := logger.New()
+
+	executor := NewExecutor(cfg, log)
+
+	if executor.config != cfg {
+		t.Error("Executor config not set correctly")
+	}
+
+	if executor.logger != log {
+		t.Error("Executor logger not set correctly")
+	}
+
+	if executor.client.Timeout != cfg.Timeout {
+		t.Error("HTTP client timeout not set correctly")
+	}
+}
+
+func TestExecuteWorkflow(t *testing.T) {
+	cfg := &config.Config{
+		Timeout: 30 * time.Second,
+	}
+	log := logger.New()
+
+	executor := NewExecutor(cfg, log)
+
+	wf := &Workflow{
+		Name:        "Test Workflow",
+		Version:     "1.0",
+		Description: "A test workflow",
+		Variables:   make(map[string]interface{}),
+		Steps: []Step{
+			{
+				Name: "Test Step 1",
+				Request: Request{
+					Method: "GET",
+					URL:    "https://api.example.com/test",
+				},
+			},
+			{
+				Name: "Test Step 2",
+				Request: Request{
+					Method: "POST",
+					URL:    "https://api.example.com/test",
+				},
+			},
+		},
+	}
+
+	results, err := executor.Execute(wf)
+	if err != nil {
+		t.Fatalf("Failed to execute workflow: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("Expected 2 results, got %d", len(results))
+	}
+
+	for i, result := range results {
+		if result.Status != "passed" {
+			t.Errorf("Step %d expected status 'passed', got '%s'", i+1, result.Status)
+		}
+
+		if result.Duration == 0 {
+			t.Errorf("Step %d duration should not be zero", i+1)
+		}
+	}
+}
+
+func TestLoadWorkflowFileNotFound(t *testing.T) {
+	_, err := Load("nonexistent.yml")
+	if err == nil {
+		t.Error("Expected error when loading nonexistent file")
+	}
+}
+
+func TestLoadWorkflowInvalidYAML(t *testing.T) {
+	// Create a temporary file with invalid YAML
+	content := `name: "Test Workflow"
+version: "1.0"
+steps:
+  - name: "Test Step"
+    request:
+      method: "GET"
+      url: "{{base_url}}/test"
+      invalid: [yaml: syntax
+
+`
+
+	tmpfile, err := os.CreateTemp("", "workflow-*.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	tmpfile.Close()
+
+	_, err = Load(tmpfile.Name())
+	if err == nil {
+		t.Error("Expected error when loading invalid YAML")
+	}
+}

@@ -1,0 +1,15 @@
+name: "Example Workflow"
+version: "1.0"
+description: "A sample workflow for Stepwise"
+
+variables:
+  base_url: "https://api.example.com"
+
+steps:
+  - name: "Health Check"
+    request:
+      method: "GET"
+      url: "{{base_url}}/health"
+    validate:
+      - status: 200
+      - time: "< 1000ms"
