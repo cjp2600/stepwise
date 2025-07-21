@@ -540,3 +540,19 @@ validate:
 - `empty: true|false` — значение пустое/не пустое (строка, массив, map, nil)
 - `nil: true|false` — значение nil/не nil
 - `len: N` — длина значения (строка, массив, map) равна N 
+
+### Advanced Validation: base64 JSON decode
+
+You can validate fields that are base64-encoded JSON using:
+
+```yaml
+validate:
+  - json: "$.widgets[0].widget"
+    decode: "base64json"
+    jsonpath: "$.title"
+    equals: "PetShop"
+```
+
+- `decode: base64json` — decode the field as base64 and parse as JSON
+- `jsonpath` — path inside the decoded JSON
+ 

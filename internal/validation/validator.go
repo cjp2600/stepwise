@@ -1,6 +1,8 @@
 package validation
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -31,9 +33,11 @@ type ValidationRule struct {
 	Pattern  string      `yaml:"pattern" json:"pattern"`
 	Custom   string      `yaml:"custom" json:"custom"`
 	Value    string      `yaml:"value" json:"value"`
-	Empty    *bool       `yaml:"empty,omitempty" json:"empty,omitempty"` // true: must be empty, false: must not be empty
-	Nil      *bool       `yaml:"nil,omitempty" json:"nil,omitempty"`     // true: must be nil, false: must not be nil
-	Len      *int        `yaml:"len,omitempty" json:"len,omitempty"`     // length must be equal to this
+	Empty    *bool       `yaml:"empty,omitempty" json:"empty,omitempty"`   // true: must be empty, false: must not be empty
+	Nil      *bool       `yaml:"nil,omitempty" json:"nil,omitempty"`       // true: must be nil, false: must not be nil
+	Len      *int        `yaml:"len,omitempty" json:"len,omitempty"`       // length must be equal to this
+	Decode   string      `yaml:"decode,omitempty" json:"decode,omitempty"` // "base64json"
+	JSONPath string      `yaml:"jsonpath,omitempty" json:"jsonpath,omitempty"`
 }
 
 // ValidationResult represents the result of a validation
@@ -144,6 +148,55 @@ func (v *Validator) validateJSON(response *http.Response, rule ValidationRule) V
 			Passed:   false,
 			Error:    fmt.Sprintf("failed to parse JSON: %v", err),
 		}
+	}
+
+	// Apply decode if needed
+	if rule.Decode == "base64json" {
+		strVal, ok := jsonData.(string)
+		if !ok {
+			return ValidationResult{
+				Type:     "decode",
+				Expected: "base64json",
+				Actual:   jsonData,
+				Passed:   false,
+				Error:    "value is not a string for base64json decode",
+			}
+		}
+		decoded, err := base64.StdEncoding.DecodeString(strVal)
+		if err != nil {
+			return ValidationResult{
+				Type:     "decode",
+				Expected: "base64json",
+				Actual:   jsonData,
+				Passed:   false,
+				Error:    "base64 decode error: " + err.Error(),
+			}
+		}
+		var decodedJSON interface{}
+		if err := json.Unmarshal(decoded, &decodedJSON); err != nil {
+			return ValidationResult{
+				Type:     "decode",
+				Expected: "base64json",
+				Actual:   jsonData,
+				Passed:   false,
+				Error:    "json decode error: " + err.Error(),
+			}
+		}
+		jsonData = decodedJSON
+	}
+	// Apply jsonpath if needed
+	if rule.JSONPath != "" {
+		val, err := v.extractJSONValue(jsonData, rule.JSONPath)
+		if err != nil {
+			return ValidationResult{
+				Type:     "jsonpath",
+				Expected: rule.JSONPath,
+				Actual:   jsonData,
+				Passed:   false,
+				Error:    "jsonpath error: " + err.Error(),
+			}
+		}
+		jsonData = val
 	}
 
 	// Extract value using JSONPath-like syntax

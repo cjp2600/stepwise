@@ -1,6 +1,9 @@
 package validation
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -325,6 +328,32 @@ func TestValidateEmptyNilLen(t *testing.T) {
 	result = validator.validateJSON(response, rule)
 	if !result.Passed {
 		t.Errorf("Expected map to have len 1")
+	}
+}
+
+func TestValidateBase64JSONDecode(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	// Пример JSON с base64-encoded JSON в поле "widget"
+	widgetObj := map[string]interface{}{"title": "PetShop", "value": 42}
+	widgetBytes, _ := json.Marshal(widgetObj)
+	widgetBase64 := base64.StdEncoding.EncodeToString(widgetBytes)
+	response := &http.Response{
+		StatusCode: 200,
+		Body:       []byte(fmt.Sprintf(`{"widgets":[{"widget":"%s"}]}`, widgetBase64)),
+		Duration:   10 * time.Millisecond,
+	}
+
+	rule := ValidationRule{
+		JSON:     "$.widgets[0].widget",
+		Decode:   "base64json",
+		JSONPath: "$.title",
+		Equals:   "PetShop",
+	}
+	result := validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected base64json decode and jsonpath to pass, got error: %v", result.Error)
 	}
 }
 
