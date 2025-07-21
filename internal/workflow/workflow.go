@@ -55,6 +55,7 @@ type Step struct {
 	RetryDelay   string                      `yaml:"retry_delay" json:"retry_delay"`
 	Timeout      string                      `yaml:"timeout" json:"timeout"`
 	Repeat       *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
+	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"` // Новое поле для задержки
 }
 
 // RepeatConfig represents configuration for repeating a step
@@ -612,6 +613,14 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 
 // executeStepWithRepeat executes a step with repeat configuration
 func (e *Executor) executeStepWithRepeat(step *Step, result *TestResult) error {
+	// Добавляем обработку wait перед выполнением шага
+	if step.Wait != "" {
+		duration := e.parseTimeout(step.Wait)
+		if duration > 0 {
+			e.logger.Info("Waiting before step", "step", step.Name, "wait", duration)
+			time.Sleep(duration)
+		}
+	}
 	if step.Repeat == nil {
 		// No repeat configuration, execute normally
 		return e.executeStep(step, result)

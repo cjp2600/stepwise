@@ -63,6 +63,24 @@ steps:
 
 Single reusable steps that can be imported and customized.
 
+**New: Step Delay (wait)**
+
+You can add a wait (delay) before a step executes:
+
+```yaml
+steps:
+  - name: "Wait 2 seconds"
+    wait: "2s"
+  - name: "Check API"
+    request:
+      method: "GET"
+      url: "https://example.com"
+    validate:
+      - status: 200
+```
+
+- `wait`: (optional) Duration to wait before executing the step. Supports Go duration format (e.g., "2s", "500ms").
+
 ```yaml
 name: "Health Check"
 version: "1.0"

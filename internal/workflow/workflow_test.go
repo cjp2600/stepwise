@@ -140,6 +140,50 @@ func TestExecuteWorkflow(t *testing.T) {
 	}
 }
 
+func TestStepWait(t *testing.T) {
+	cfg := &config.Config{
+		Timeout: 5 * time.Second,
+	}
+	log := logger.New()
+	executor := NewExecutor(cfg, log)
+
+	wf := &Workflow{
+		Name:        "Test Wait Step",
+		Version:     "1.0",
+		Description: "Workflow with wait step",
+		Variables:   make(map[string]interface{}),
+		Steps: []Step{
+			{
+				Name: "Wait Step",
+				Wait: "1s",
+				Request: Request{
+					Method: "GET",
+					URL:    "https://jsonplaceholder.typicode.com/posts/1",
+				},
+				Validate: []validation.ValidationRule{
+					{Status: 200},
+				},
+			},
+		},
+	}
+
+	start := time.Now()
+	results, err := executor.Execute(wf)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Failed to execute workflow: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if results[0].Status != "passed" {
+		t.Errorf("Expected status 'passed', got '%s'", results[0].Status)
+	}
+	if elapsed < time.Second {
+		t.Errorf("Expected at least 1s elapsed, got %v", elapsed)
+	}
+}
+
 func TestLoadWorkflowFileNotFound(t *testing.T) {
 	_, err := Load("nonexistent.yml")
 	if err == nil {

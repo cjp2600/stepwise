@@ -74,6 +74,7 @@ type Step struct {
     Validate    []Validation
     Capture     map[string]string
     Condition   string
+    Wait        string // (optional) Wait/delay before step execution
 }
 ```
 
@@ -176,11 +177,12 @@ The logging component provides structured logging throughout the application.
 3. Parse YAML/JSON into Workflow struct
 4. Initialize Executor with configuration
 5. For each step:
-   a. Substitute variables
-   b. Execute HTTP request
-   c. Capture response data
-   d. Run validations
-   e. Store results
+   a. If wait is set, sleep for the specified duration
+   b. Substitute variables
+   c. Execute HTTP request
+   d. Capture response data
+   e. Run validations
+   f. Store results
 6. Generate and display report
 ```
 
