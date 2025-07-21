@@ -345,8 +345,24 @@ data:
 
 See the `examples/` directory for complete workflow examples:
 
+### Basic Examples
 - `examples/basic-workflow.yml` - Basic API testing workflow
 - `examples/advanced-workflow.yml` - Advanced workflow with authentication
+- `examples/simple-test.yml` - Simple HTTP testing
+
+### Component Examples
+- `examples/simple-template-demo.yml` - Using imported templates
+- `examples/use-httpbin-template.yml` - HTTPBin API template usage
+- `examples/use-jsonplaceholder-template.yml` - JSONPlaceholder API template usage
+
+### Mixed Protocol Examples
+- `examples/demo-mixed-workflow.yml` - HTTP and gRPC testing
+- `examples/mixed-protocol-test.yml` - Mixed protocol workflow
+
+### Templates
+- `examples/templates/httpbin-api.yml` - HTTPBin API template
+- `examples/templates/jsonplaceholder-api.yml` - JSONPlaceholder API template
+- `examples/templates/github-api.yml` - GitHub API template
 
 ## Architecture
 
@@ -368,7 +384,12 @@ stepwise/
 │   ├── config/           # Configuration management
 │   ├── logger/           # Logging functionality
 │   └── workflow/         # Workflow execution engine
+├── components/            # Reusable components
+│   ├── auth/             # Authentication components
+│   ├── common/           # Common utilities
+│   └── api/              # API-specific components
 ├── examples/             # Example workflows
+│   └── templates/        # Example templates
 ├── docs/                # Documentation
 └── tests/               # Test files
 ```
@@ -447,13 +468,17 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - [x] Simple validation engine
 - [x] CLI interface
 - [x] Basic reporting
+- [x] gRPC support
+- [x] Colorful output with CI compatibility
+- [x] Verbose logging
 
-### Phase 2: Advanced Features 🚧
-- [ ] Multi-step workflows
-- [ ] Data generation
-- [ ] Advanced validators
-- [ ] Plugin system
-- [ ] Performance testing
+### Phase 2: Advanced Features ✅
+- [x] Multi-step workflows
+- [x] Component system with imports
+- [x] Advanced validators
+- [x] Recursive directory execution
+- [x] Performance testing
+- [x] Proper exit codes for CI/CD
 
 ### Phase 3: Enterprise Features 📋
 - [ ] Distributed execution
@@ -471,6 +496,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Inspired by [Step CI](https://stepci.com/)
 - Built with Go and modern testing practices
 - Community-driven development
+
+## Documentation
+
+- **[Getting Started](README.md)** - This guide
+- **[CLI Reference](docs/CLI.md)** - Complete command-line interface guide
+- **[Component System](docs/COMPONENTS.md)** - Reusable components and templates
+- **[Import System](docs/IMPORTS.md)** - Advanced import functionality
+- **[API Reference](docs/API.md)** - Complete API documentation
 
 ## Support
 
