@@ -1,0 +1,90 @@
+name: "Repeat Demo - Create Multiple Orders"
+version: "1.0"
+description: "Demonstrates the repeat functionality to create multiple orders and test them"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  api_key: "demo-key-123"
+
+steps:
+  - name: "Create Multiple Orders"
+    request:
+      method: "POST"
+      url: "{{base_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer {{api_key}}"
+      body:
+        title: "Order {{iteration}}"
+        body: "This is order number {{iteration}} created at {{faker.date}}"
+        userId: "{{index}}"
+    validate:
+      - status: 201
+      - json: "$.id"
+        type: "number"
+      - json: "$.title"
+        contains: "Order"
+    capture:
+      order_id: "$.id"
+      order_title: "$.title"
+    repeat:
+      count: 5
+      delay: "1s"
+      parallel: false
+      variables:
+        order_number: "{{iteration}}"
+        user_id: "{{index}}"
+
+  - name: "Create Orders in Parallel"
+    request:
+      method: "POST"
+      url: "{{base_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer {{api_key}}"
+      body:
+        title: "Parallel Order {{iteration}}"
+        body: "This is parallel order {{iteration}}"
+        userId: "{{index}}"
+    validate:
+      - status: 201
+      - json: "$.id"
+        type: "number"
+    capture:
+      parallel_order_id: "$.id"
+    repeat:
+      count: 3
+      parallel: true
+      variables:
+        order_number: "{{iteration}}"
+        user_id: "{{index}}"
+
+  - name: "Get All Created Orders"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      headers:
+        Authorization: "Bearer {{api_key}}"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+      - json: "$.length"
+        greater: 0
+    capture:
+      total_posts: "$.length"
+
+  - name: "Health Check with Retry"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+    repeat:
+      count: 3
+      delay: "2s"
+      parallel: false 

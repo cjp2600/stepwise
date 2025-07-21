@@ -1,0 +1,128 @@
+name: "Advanced Repeat Examples"
+version: "1.0"
+description: "Advanced examples of repeat functionality with different scenarios"
+
+variables:
+  base_url: "https://httpbin.org"
+  api_base: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Test Different Status Codes"
+    request:
+      method: "GET"
+      url: "{{base_url}}/status/200"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+    repeat:
+      count: 4
+      parallel: false
+      variables:
+        status_code: "200"
+        expected_status: 200
+
+  - name: "Create Users with Different Data"
+    request:
+      method: "POST"
+      url: "{{api_base}}/users"
+      headers:
+        Content-Type: "application/json"
+      body:
+        name: "{{user_name}}"
+        email: "{{user_email}}"
+        phone: "{{user_phone}}"
+        address:
+          street: "{{street_address}}"
+          city: "{{city}}"
+          zipcode: "{{zipcode}}"
+    validate:
+      - status: 201
+      - json: "$.id"
+        type: "number"
+      - json: "$.name"
+        type: "string"
+    capture:
+      user_id: "$.id"
+      user_email: "$.email"
+    repeat:
+      count: 3
+      delay: "1s"
+      parallel: false
+      variables:
+        user_name: "{{faker.name}}"
+        user_email: "{{faker.email}}"
+        user_phone: "{{faker.phone}}"
+        street_address: "{{faker.address}}"
+        city: "{{faker.city}}"
+        zipcode: "{{faker.zipcode}}"
+
+  - name: "Load Test - Parallel Requests"
+    request:
+      method: "GET"
+      url: "{{base_url}}/delay/{{delay_time}}"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - time: "< 5s"
+    repeat:
+      count: 10
+      parallel: true
+      variables:
+        delay_time: "1"
+
+  - name: "Test Different HTTP Methods"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+    repeat:
+      count: 4
+      parallel: false
+      variables:
+        http_method: "GET"
+        endpoint: "get"
+        expected_status: 200
+
+  - name: "Create Posts with Incremental IDs"
+    request:
+      method: "POST"
+      url: "{{api_base}}/posts"
+      headers:
+        Content-Type: "application/json"
+      body:
+        title: "Post {{iteration}}"
+        body: "This is post number {{iteration}} with ID {{index}}"
+        userId: "{{user_id}}"
+    validate:
+      - status: 201
+      - json: "$.title"
+        contains: "Post {{iteration}}"
+    capture:
+      post_id: "$.id"
+    repeat:
+      count: 5
+      delay: "500ms"
+      parallel: false
+      variables:
+        user_id: "{{iteration}}"
+
+  - name: "Validate All Created Posts"
+    request:
+      method: "GET"
+      url: "{{api_base}}/posts/{{post_id}}"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        type: "number"
+    repeat:
+      count: 5
+      parallel: true
+      variables:
+        post_id: "{{iteration}}" 
