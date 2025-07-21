@@ -515,3 +515,19 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Stepwise** - Making API testing simple, powerful, and accessible. 
+
+## Установка CLI
+
+Установить CLI можно одной командой:
+
+```sh
+go install github.com/cjp2600/stepwise@latest
+```
+
+После этого бинарник появится в вашем $GOPATH/bin или $GOBIN.
+
+## Использование
+
+```sh
+stepwise [аргументы]
+``` 
