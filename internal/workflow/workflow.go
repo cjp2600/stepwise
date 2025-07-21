@@ -571,15 +571,9 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 						Body:       jsonData,
 						Duration:   grpcResponse.Duration,
 					}
-					// DEBUG: печатаем jsonData
-					fmt.Println("[DEBUG] gRPC response for capture:", string(jsonData))
 					captureErr = e.captureValues(mockResponse, step.Capture, result)
 				}
 			} else {
-				// DEBUG: печатаем httpResponse.Body
-				if httpResponse != nil {
-					fmt.Println("[DEBUG] HTTP response for capture:", string(httpResponse.Body))
-				}
 				captureErr = e.captureValues(httpResponse, step.Capture, result)
 			}
 			if captureErr != nil {
@@ -603,8 +597,6 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 					fmt.Println("================ RESPONSE ================")
 					fmt.Println(string(httpResponse.Body))
 					fmt.Println("================ END RESPONSE ================")
-				} else {
-					fmt.Println("[DEBUG] httpResponse.Body is empty or nil")
 				}
 			}
 		}

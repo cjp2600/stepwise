@@ -151,14 +151,6 @@ func (c *Client) Execute(req *Request) (*Response, error) {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// DEBUG: выводим тело ответа сразу после чтения
-	fmt.Println("======= HTTP CLIENT RAW RESPONSE =======")
-	fmt.Printf("[DEBUG] Body type: %T\n", body)
-	fmt.Printf("[DEBUG] Body len: %d\n", len(body))
-	fmt.Println(string(body))
-	fmt.Printf("[DEBUG] Body hex: %x\n", body)
-	fmt.Println("======= END HTTP CLIENT RAW RESPONSE =======")
-
 	duration := time.Since(start)
 
 	// Log response
