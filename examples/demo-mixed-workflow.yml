@@ -1,0 +1,155 @@
+name: "Mixed Protocol Demo"
+version: "1.0"
+description: "Comprehensive demo of HTTP and gRPC testing capabilities"
+
+variables:
+  api_base_url: "https://jsonplaceholder.typicode.com"
+  grpc_server: "localhost:50051"
+  test_user_id: "1"
+  test_post_title: "Stepwise Demo Post"
+
+steps:
+  # HTTP Tests
+  - name: "HTTP GET - Fetch User"
+    description: "Fetch user data via HTTP GET"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{api_base_url}}/users/{{test_user_id}}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.id"
+        equals: 1
+      - json_path: "$.name"
+        type: "string"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email"
+      user_id: "$.id"
+
+  - name: "HTTP POST - Create Post"
+    description: "Create a new post via HTTP POST"
+    request:
+      protocol: "http"
+      method: "POST"
+      url: "{{api_base_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+      body:
+        title: "{{test_post_title}}"
+        body: "This post was created by Stepwise mixed protocol demo"
+        userId: "{{user_id}}"
+      timeout: "5s"
+    validate:
+      - status: 201
+      - json_path: "$.title"
+        equals: "{{test_post_title}}"
+      - json_path: "$.id"
+        type: "number"
+    capture:
+      post_id: "$.id"
+      post_title: "$.title"
+
+  # gRPC Tests
+  - name: "gRPC User Service - Get User"
+    description: "Fetch user data via gRPC"
+    request:
+      protocol: "grpc"
+      service: "UserService"
+      grpc_method: "GetUser"
+      server_addr: "{{grpc_server}}"
+      insecure: true
+      data:
+        user_id: "{{test_user_id}}"
+      metadata:
+        api_key: "demo-key"
+        client_id: "stepwise-demo"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json_path: "$.user_id"
+        equals: "1"
+      - json_path: "$.name"
+        type: "string"
+    capture:
+      grpc_user_id: "$.user_id"
+      grpc_user_name: "$.name"
+      grpc_user_email: "$.email"
+
+  - name: "gRPC Order Service - Create Order"
+    description: "Create an order via gRPC"
+    request:
+      protocol: "grpc"
+      service: "OrderService"
+      grpc_method: "CreateOrder"
+      server_addr: "{{grpc_server}}"
+      insecure: true
+      data:
+        user_id: "{{grpc_user_id}}"
+        items:
+          - product_id: "DEMO-001"
+            quantity: 2
+            price: 29.99
+          - product_id: "DEMO-002"
+            quantity: 1
+            price: 19.99
+        total_amount: 79.97
+      metadata:
+        api_key: "demo-key"
+        client_id: "stepwise-demo"
+        order_type: "demo"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json_path: "$.order_id"
+        type: "string"
+      - json_path: "$.status"
+        equals: "created"
+      - json_path: "$.user_id"
+        equals: "{{grpc_user_id}}"
+    capture:
+      order_id: "$.order_id"
+      order_status: "$.status"
+      order_total: "$.total_amount"
+
+  # Mixed Protocol Validation
+  - name: "HTTP Validation with gRPC Data"
+    description: "Use captured gRPC data in HTTP request"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{api_base_url}}/users/{{grpc_user_id}}"
+      headers:
+        Content-Type: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.id"
+        equals: "{{grpc_user_id}}"
+    capture:
+      final_user_name: "$.name"
+
+  - name: "HTTP Update with Mixed Data"
+    description: "Update post using data from both protocols"
+    request:
+      protocol: "http"
+      method: "PUT"
+      url: "{{api_base_url}}/posts/{{post_id}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        id: "{{post_id}}"
+        title: "Updated: {{post_title}} for {{grpc_user_name}}"
+        body: "Updated by Stepwise - Order: {{order_id}}"
+        userId: "{{user_id}}"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.title"
+        contains: "{{grpc_user_name}}"
+    capture:
+      updated_post_title: "$.title" 

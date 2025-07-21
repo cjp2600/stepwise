@@ -1,0 +1,26 @@
+name: "Simple gRPC Test"
+version: "1.0"
+description: "Simple test workflow for gRPC calls"
+
+variables:
+  grpc_server: "localhost:50051"
+
+steps:
+  - name: "gRPC User Service Call"
+    description: "Make a gRPC call to user service"
+    request:
+      protocol: "grpc"
+      service: "UserService"
+      grpc_method: "GetUser"
+      server_addr: "{{grpc_server}}"
+      insecure: true
+      data:
+        user_id: "1"
+      metadata:
+        api_key: "test-key"
+      timeout: "10s"
+    validate:
+      - status: 200
+    capture:
+      grpc_user_id: "$.user_id"
+      grpc_user_name: "$.name" 

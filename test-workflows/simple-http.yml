@@ -1,0 +1,17 @@
+name: "Simple HTTP Test"
+version: "1.0"
+description: "Simple HTTP test workflow"
+
+steps:
+  - name: "HTTP GET Test"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/1"
+      headers:
+        Content-Type: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+    capture:
+      user_name: "$.name" 

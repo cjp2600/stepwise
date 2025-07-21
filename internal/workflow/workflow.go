@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cjp2600/stepwise/internal/config"
+	grpcclient "github.com/cjp2600/stepwise/internal/grpc"
 	httpclient "github.com/cjp2600/stepwise/internal/http"
 	"github.com/cjp2600/stepwise/internal/logger"
 	"github.com/cjp2600/stepwise/internal/validation"
@@ -50,15 +51,29 @@ type Step struct {
 	Timeout     string                      `yaml:"timeout" json:"timeout"`
 }
 
-// Request represents an HTTP request
+// Request represents an HTTP or gRPC request
 type Request struct {
+	// Protocol type: "http" or "grpc"
+	Protocol string `yaml:"protocol" json:"protocol"`
+
+	// HTTP fields
 	Method  string            `yaml:"method" json:"method"`
 	URL     string            `yaml:"url" json:"url"`
 	Headers map[string]string `yaml:"headers" json:"headers"`
 	Body    interface{}       `yaml:"body" json:"body"`
 	Query   map[string]string `yaml:"query" json:"query"`
-	Timeout string            `yaml:"timeout" json:"timeout"`
 	Auth    *httpclient.Auth  `yaml:"auth" json:"auth"`
+
+	// gRPC fields
+	Service    string            `yaml:"service" json:"service"`
+	GRPCMethod string            `yaml:"grpc_method" json:"grpc_method"`
+	Data       interface{}       `yaml:"data" json:"data"`
+	Metadata   map[string]string `yaml:"metadata" json:"metadata"`
+	ServerAddr string            `yaml:"server_addr" json:"server_addr"`
+	Insecure   bool              `yaml:"insecure" json:"insecure"`
+
+	// Common fields
+	Timeout string `yaml:"timeout" json:"timeout"`
 }
 
 // TestResult represents the result of a test step
@@ -86,7 +101,8 @@ type GroupResult struct {
 type Executor struct {
 	config     *config.Config
 	logger     *logger.Logger
-	client     *httpclient.Client
+	httpClient *httpclient.Client
+	grpcClient *grpcclient.Client
 	validator  *validation.Validator
 	varManager *variables.Manager
 }
@@ -96,7 +112,8 @@ func NewExecutor(cfg *config.Config, log *logger.Logger) *Executor {
 	return &Executor{
 		config:     cfg,
 		logger:     log,
-		client:     httpclient.NewClient(cfg.Timeout, log),
+		httpClient: httpclient.NewClient(cfg.Timeout, log),
+		grpcClient: nil, // Will be initialized when needed
 		validator:  validation.NewValidator(log),
 		varManager: variables.NewManager(log),
 	}
@@ -378,28 +395,92 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			continue
 		}
 
-		// Execute HTTP request
-		response, err := e.client.Execute(&httpclient.Request{
-			Method:  substitutedReq.Method,
-			URL:     substitutedReq.URL,
-			Headers: substitutedReq.Headers,
-			Body:    substitutedReq.Body,
-			Query:   substitutedReq.Query,
-			Timeout: e.parseTimeout(substitutedReq.Timeout),
-			Auth:    substitutedReq.Auth,
-		})
+		// Set default protocol to HTTP if not specified
+		if substitutedReq.Protocol == "" {
+			substitutedReq.Protocol = "http"
+		}
 
-		if err != nil {
-			lastError = fmt.Errorf("HTTP request failed: %w", err)
+		e.logger.Debug("Request details",
+			"protocol", substitutedReq.Protocol,
+			"url", substitutedReq.URL,
+			"service", substitutedReq.Service,
+			"method", substitutedReq.Method,
+			"grpc_method", substitutedReq.GRPCMethod)
+
+		// Execute request based on protocol
+		var httpResponse *httpclient.Response
+		var grpcResponse *grpcclient.Response
+		var requestErr error
+
+		e.logger.Debug("Executing request", "protocol", substitutedReq.Protocol)
+
+		if substitutedReq.Protocol == "grpc" {
+			// Initialize gRPC client if not already done
+			if e.grpcClient == nil {
+				grpcClient, err := grpcclient.NewClient(substitutedReq.ServerAddr, substitutedReq.Insecure, e.logger)
+				if err != nil {
+					lastError = fmt.Errorf("failed to create gRPC client: %w", err)
+					continue
+				}
+				e.grpcClient = grpcClient
+			}
+
+			// Execute gRPC request
+			grpcReq := &grpcclient.Request{
+				Service:    substitutedReq.Service,
+				Method:     substitutedReq.GRPCMethod,
+				Data:       substitutedReq.Data,
+				Metadata:   substitutedReq.Metadata,
+				ServerAddr: substitutedReq.ServerAddr,
+				Insecure:   substitutedReq.Insecure,
+				Timeout:    e.parseTimeout(substitutedReq.Timeout),
+			}
+			grpcResponse, requestErr = e.grpcClient.Execute(grpcReq)
+		} else {
+			// Execute HTTP request (default)
+			httpReq := &httpclient.Request{
+				Method:  substitutedReq.Method,
+				URL:     substitutedReq.URL,
+				Headers: substitutedReq.Headers,
+				Body:    substitutedReq.Body,
+				Query:   substitutedReq.Query,
+				Timeout: e.parseTimeout(substitutedReq.Timeout),
+				Auth:    substitutedReq.Auth,
+			}
+			httpResponse, requestErr = e.httpClient.Execute(httpReq)
+		}
+
+		if requestErr != nil {
+			lastError = fmt.Errorf("request failed: %w", requestErr)
 			continue
 		}
 
 		// Run validations
 		var validationErrors []string
 		if len(step.Validate) > 0 {
-			validationResults, err := e.validator.Validate(response, step.Validate)
-			if err != nil {
-				validationErrors = append(validationErrors, err.Error())
+			var validationResults []validation.ValidationResult
+			var validationErr error
+
+			if substitutedReq.Protocol == "grpc" {
+				// For gRPC, we'll need to create a mock HTTP response for validation
+				// This is a simplified approach - in production you'd want proper gRPC validation
+				jsonData, err := json.Marshal(grpcResponse.Data)
+				if err != nil {
+					validationErr = fmt.Errorf("failed to marshal gRPC response for validation: %w", err)
+				} else {
+					mockResponse := &httpclient.Response{
+						StatusCode: 200, // gRPC OK status
+						Body:       jsonData,
+						Duration:   grpcResponse.Duration,
+					}
+					validationResults, validationErr = e.validator.Validate(mockResponse, step.Validate)
+				}
+			} else {
+				validationResults, validationErr = e.validator.Validate(httpResponse, step.Validate)
+			}
+
+			if validationErr != nil {
+				validationErrors = append(validationErrors, validationErr.Error())
 			} else {
 				for _, validationResult := range validationResults {
 					if !validationResult.Passed {
@@ -416,8 +497,25 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 
 		// Capture values if specified
 		if step.Capture != nil {
-			if err := e.captureValues(response, step.Capture, result); err != nil {
-				e.logger.Warn("Failed to capture values", "step", step.Name, "error", err)
+			var captureErr error
+			if substitutedReq.Protocol == "grpc" {
+				// For gRPC, create a mock response for capture
+				jsonData, err := json.Marshal(grpcResponse.Data)
+				if err != nil {
+					captureErr = fmt.Errorf("failed to marshal gRPC response: %w", err)
+				} else {
+					mockResponse := &httpclient.Response{
+						StatusCode: 200,
+						Body:       jsonData,
+						Duration:   grpcResponse.Duration,
+					}
+					captureErr = e.captureValues(mockResponse, step.Capture, result)
+				}
+			} else {
+				captureErr = e.captureValues(httpResponse, step.Capture, result)
+			}
+			if captureErr != nil {
+				e.logger.Warn("Failed to capture values", "step", step.Name, "error", captureErr)
 			}
 		}
 
@@ -440,12 +538,19 @@ func (e *Executor) initializeVariables(vars map[string]interface{}) {
 // substituteRequestVariables substitutes variables in the request
 func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 	substituted := &Request{
-		Method:  req.Method,
-		URL:     req.URL,
-		Headers: make(map[string]string),
-		Body:    req.Body,
-		Query:   make(map[string]string),
-		Timeout: req.Timeout,
+		Protocol:   req.Protocol,
+		Method:     req.Method,
+		URL:        req.URL,
+		Headers:    make(map[string]string),
+		Body:       req.Body,
+		Query:      make(map[string]string),
+		Service:    req.Service,
+		GRPCMethod: req.GRPCMethod,
+		Data:       req.Data,
+		Metadata:   req.Metadata,
+		ServerAddr: req.ServerAddr,
+		Insecure:   req.Insecure,
+		Timeout:    req.Timeout,
 	}
 
 	// Substitute URL
@@ -490,6 +595,33 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 			}
 		default:
 			substituted.Body = req.Body
+		}
+	}
+
+	// Substitute gRPC fields
+	if substitutedServerAddr, err := e.varManager.Substitute(req.ServerAddr); err != nil {
+		return nil, fmt.Errorf("failed to substitute server_addr: %w", err)
+	} else {
+		substituted.ServerAddr = substitutedServerAddr
+	}
+
+	// Substitute gRPC data
+	if req.Data != nil {
+		switch data := req.Data.(type) {
+		case string:
+			if substitutedData, err := e.varManager.Substitute(data); err != nil {
+				return nil, fmt.Errorf("failed to substitute data: %w", err)
+			} else {
+				substituted.Data = substitutedData
+			}
+		case map[string]interface{}:
+			if substitutedData, err := e.varManager.SubstituteMap(data); err != nil {
+				return nil, fmt.Errorf("failed to substitute data: %w", err)
+			} else {
+				substituted.Data = substitutedData
+			}
+		default:
+			substituted.Data = req.Data
 		}
 	}
 

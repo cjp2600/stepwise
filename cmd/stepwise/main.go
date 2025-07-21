@@ -27,4 +27,7 @@ func main() {
 		logger.Error("CLI execution failed", "error", err)
 		os.Exit(1)
 	}
+
+	// If we reach here, everything was successful
+	os.Exit(0)
 }

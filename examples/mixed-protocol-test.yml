@@ -1,0 +1,117 @@
+name: "Mixed Protocol Test"
+version: "1.0"
+description: "Test workflow demonstrating both HTTP and gRPC calls"
+
+variables:
+  api_base_url: "https://jsonplaceholder.typicode.com"
+  grpc_server: "localhost:50051"
+  test_user_id: "1"
+
+steps:
+  - name: "HTTP GET Request"
+    description: "Make an HTTP GET request to fetch user data"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{api_base_url}}/users/{{test_user_id}}"
+      headers:
+        Content-Type: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.id"
+        equals: 1
+      - json_path: "$.name"
+        type: "string"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email"
+
+  - name: "HTTP POST Request"
+    description: "Make an HTTP POST request to create a new post"
+    request:
+      protocol: "http"
+      method: "POST"
+      url: "{{api_base_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+      body:
+        title: "Test Post"
+        body: "This is a test post created by Stepwise"
+        userId: 1
+      timeout: "5s"
+    validate:
+      - status: 201
+      - json_path: "$.id"
+        type: "number"
+      - json_path: "$.title"
+        equals: "Test Post"
+    capture:
+      post_id: "$.id"
+
+  - name: "gRPC User Service Call"
+    description: "Make a gRPC call to user service"
+    request:
+      protocol: "grpc"
+      service: "UserService"
+      grpc_method: "GetUser"
+      server_addr: "{{grpc_server}}"
+      insecure: true
+      data:
+        user_id: "{{test_user_id}}"
+      metadata:
+        api_key: "test-key"
+        client_id: "stepwise-test"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json_path: "$.user_id"
+        equals: "1"
+    capture:
+      grpc_user_id: "$.user_id"
+      grpc_user_name: "$.name"
+
+  - name: "gRPC Order Service Call"
+    description: "Make a gRPC call to order service"
+    request:
+      protocol: "grpc"
+      service: "OrderService"
+      grpc_method: "CreateOrder"
+      server_addr: "{{grpc_server}}"
+      insecure: true
+      data:
+        user_id: "{{grpc_user_id}}"
+        items:
+          - product_id: "123"
+            quantity: 2
+            price: 29.99
+        total_amount: 59.98
+      metadata:
+        api_key: "test-key"
+        client_id: "stepwise-test"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json_path: "$.order_id"
+        type: "string"
+      - json_path: "$.status"
+        equals: "created"
+    capture:
+      order_id: "$.order_id"
+      order_status: "$.status"
+
+  - name: "HTTP Validation with gRPC Data"
+    description: "Use captured gRPC data in HTTP request"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{api_base_url}}/users/{{grpc_user_id}}"
+      headers:
+        Content-Type: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.id"
+        equals: "{{grpc_user_id}}"
+    capture:
+      final_user_name: "$.name" 

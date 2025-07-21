@@ -1,0 +1,59 @@
+name: "Basic Mixed Protocol Test"
+version: "1.0"
+description: "Basic test workflow demonstrating both HTTP and gRPC calls"
+
+variables:
+  api_base_url: "https://jsonplaceholder.typicode.com"
+  grpc_server: "localhost:50051"
+
+steps:
+  - name: "HTTP GET Request"
+    description: "Make an HTTP GET request"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{api_base_url}}/users/1"
+      headers:
+        Content-Type: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+    capture:
+      user_name: "$.name"
+
+  - name: "gRPC User Service Call"
+    description: "Make a gRPC call to user service"
+    request:
+      protocol: "grpc"
+      service: "UserService"
+      grpc_method: "GetUser"
+      server_addr: "{{grpc_server}}"
+      insecure: true
+      data:
+        user_id: "1"
+      metadata:
+        api_key: "test-key"
+      timeout: "10s"
+    validate:
+      - status: 200
+    capture:
+      grpc_user_id: "$.user_id"
+      grpc_user_name: "$.name"
+
+  - name: "HTTP POST Request"
+    description: "Make an HTTP POST request"
+    request:
+      protocol: "http"
+      method: "POST"
+      url: "{{api_base_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+      body:
+        title: "Test Post"
+        body: "This is a test post"
+        userId: 1
+      timeout: "5s"
+    validate:
+      - status: 201
+    capture:
+      post_id: "$.id" 
