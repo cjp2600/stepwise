@@ -1,0 +1,27 @@
+name: "Simple Template Demo"
+version: "1.0"
+description: "Simple demonstration of template usage"
+
+variables:
+  test_user_id: "1"
+
+imports:
+  - path: "examples/templates/httpbin-api"
+    alias: "HTTPBin Tests"
+
+steps:
+  - name: "Simple JSONPlaceholder Test"
+    description: "Simple test without template"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/{{test_user_id}}"
+      headers:
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+    capture:
+      user_name: "$.name" 

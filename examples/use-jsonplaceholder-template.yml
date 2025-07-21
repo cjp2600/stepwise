@@ -1,0 +1,31 @@
+name: "JSONPlaceholder API Test"
+version: "1.0"
+description: "Test using JSONPlaceholder template"
+
+variables:
+  test_user_id: "1"
+  test_post_id: "1"
+
+imports:
+  - path: "examples/templates/jsonplaceholder-api"
+    alias: "JSONPlaceholder Tests"
+    variables:
+      test_user_id: "{{test_user_id}}"
+      test_post_id: "{{test_post_id}}"
+
+steps:
+  - name: "Custom User Validation"
+    description: "Additional validation after template execution"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/{{test_user_id}}/posts"
+      headers:
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+    capture:
+      user_posts_count: "$.length" 

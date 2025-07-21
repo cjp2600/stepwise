@@ -1,0 +1,27 @@
+name: "Simple Imports Test"
+version: "1.0"
+description: "Simple test to verify imports work"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+imports:
+  - path: "components/common/health-check"
+    alias: "Health Check"
+    variables:
+      health_endpoint: "/posts/1"
+
+steps:
+  - name: "Simple Test"
+    description: "Simple test step"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{base_url}}/users/1"
+      headers:
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+    capture:
+      user_name: "$.name" 

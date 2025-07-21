@@ -1,0 +1,46 @@
+name: "JSONPlaceholder API Template"
+version: "1.0"
+description: "Reusable template for testing JSONPlaceholder API"
+type: "workflow"
+
+variables:
+  api_base: "https://jsonplaceholder.typicode.com"
+  test_user_id: "1"
+  test_post_id: "1"
+
+steps:
+  - name: "Get User"
+    description: "Fetch user information"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{api_base}}/users/{{test_user_id}}"
+      headers:
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json: "$.id"
+        type: "number"
+      - json: "$.name"
+        type: "string"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email"
+
+  - name: "Get User Posts"
+    description: "Fetch posts by user"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{api_base}}/posts?userId={{test_user_id}}"
+      headers:
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+    capture:
+      post_count: "$.length"
+      first_post_id: "$.[0].id" 

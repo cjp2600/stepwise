@@ -204,7 +204,19 @@ func (v *Validator) validateXML(response *http.Response, rule ValidationRule) Va
 
 // validateEquals validates equality
 func (v *Validator) validateEquals(actual, expected interface{}) ValidationResult {
-	passed := reflect.DeepEqual(actual, expected)
+	// Convert both values to float64 for numeric comparison
+	actualFloat, actualOk := v.toFloat64(actual)
+	expectedFloat, expectedOk := v.toFloat64(expected)
+
+	var passed bool
+	if actualOk && expectedOk {
+		// Both are numeric, compare as floats
+		passed = actualFloat == expectedFloat
+	} else {
+		// Use deep equality for non-numeric values
+		passed = reflect.DeepEqual(actual, expected)
+	}
+
 	return ValidationResult{
 		Type:     "equals",
 		Expected: expected,

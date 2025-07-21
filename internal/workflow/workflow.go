@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,17 +26,19 @@ type Workflow struct {
 	Version     string                 `yaml:"version" json:"version"`
 	Description string                 `yaml:"description" json:"description"`
 	Variables   map[string]interface{} `yaml:"variables" json:"variables"`
+	Imports     []Import               `yaml:"imports,omitempty" json:"imports,omitempty"`
 	Steps       []Step                 `yaml:"steps" json:"steps"`
 	Groups      []StepGroup            `yaml:"groups" json:"groups"`
 }
 
 // StepGroup represents a group of steps that can be executed together
 type StepGroup struct {
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
-	Parallel    bool   `yaml:"parallel" json:"parallel"`
-	Condition   string `yaml:"condition" json:"condition"`
-	Steps       []Step `yaml:"steps" json:"steps"`
+	Name        string      `yaml:"name" json:"name"`
+	Description string      `yaml:"description" json:"description"`
+	Parallel    bool        `yaml:"parallel" json:"parallel"`
+	Condition   string      `yaml:"condition" json:"condition"`
+	Steps       []Step      `yaml:"steps" json:"steps"`
+	Groups      []StepGroup `yaml:"groups,omitempty" json:"groups,omitempty"`
 }
 
 // Step represents a single test step
@@ -121,6 +124,11 @@ func NewExecutor(cfg *config.Config, log *logger.Logger) *Executor {
 
 // Load loads a workflow from a file
 func Load(filename string) (*Workflow, error) {
+	return LoadWithImports(filename, []string{"./components", "./templates"})
+}
+
+// LoadWithImports loads a workflow from a file with import resolution
+func LoadWithImports(filename string, searchPaths []string) (*Workflow, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open workflow file: %w", err)
@@ -145,6 +153,18 @@ func Load(filename string) (*Workflow, error) {
 	// Set defaults
 	if workflow.Variables == nil {
 		workflow.Variables = make(map[string]interface{})
+	}
+
+	// Resolve imports if any
+	if len(workflow.Imports) > 0 {
+		// Get the directory of the workflow file for relative imports
+		workflowDir := filepath.Dir(filename)
+		searchPaths = append([]string{workflowDir}, searchPaths...)
+
+		importManager := NewImportManager(searchPaths)
+		if err := importManager.ResolveImports(&workflow); err != nil {
+			return nil, fmt.Errorf("failed to resolve imports: %w", err)
+		}
 	}
 
 	return &workflow, nil

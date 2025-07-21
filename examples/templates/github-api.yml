@@ -1,0 +1,48 @@
+name: "GitHub API Template"
+version: "1.0"
+description: "Reusable template for testing GitHub API"
+type: "workflow"
+
+variables:
+  github_api: "https://api.github.com"
+  repo_owner: "octocat"
+  repo_name: "Hello-World"
+
+steps:
+  - name: "Get Repository"
+    description: "Fetch repository information"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{github_api}}/repos/{{repo_owner}}/{{repo_name}}"
+      headers:
+        Accept: "application/vnd.github.v3+json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json: "$.name"
+        equals: "{{repo_name}}"
+      - json: "$.owner.login"
+        equals: "{{repo_owner}}"
+    capture:
+      repo_id: "$.id"
+      repo_full_name: "$.full_name"
+      repo_description: "$.description"
+
+  - name: "Get Repository Issues"
+    description: "Fetch repository issues"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{github_api}}/repos/{{repo_owner}}/{{repo_name}}/issues"
+      headers:
+        Accept: "application/vnd.github.v3+json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+    capture:
+      issue_count: "$.length" 

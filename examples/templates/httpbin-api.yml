@@ -1,0 +1,50 @@
+name: "HTTPBin API Template"
+version: "1.0"
+description: "Reusable template for testing HTTPBin API"
+type: "workflow"
+
+variables:
+  httpbin_base: "https://httpbin.org"
+
+steps:
+  - name: "Test GET Request"
+    description: "Test basic GET request"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{httpbin_base}}/get"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json: "$.url"
+        contains: "httpbin.org"
+    capture:
+      response_url: "$.url"
+      response_headers: "$.headers"
+
+  - name: "Test POST Request"
+    description: "Test POST request with JSON body"
+    request:
+      protocol: "http"
+      method: "POST"
+      url: "{{httpbin_base}}/post"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+      body:
+        message: "Hello from Stepwise"
+        timestamp: "{{faker.date}}"
+        random_id: "{{faker.uuid}}"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json: "$.json.message"
+        equals: "Hello from Stepwise"
+      - json: "$.json.random_id"
+        type: "string"
+    capture:
+      response_id: "$.json.random_id" 

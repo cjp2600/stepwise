@@ -1,0 +1,37 @@
+name: "Bearer Token Authentication"
+version: "1.0"
+description: "Reusable bearer token authentication step"
+type: "step"
+
+variables:
+  token_url: "${TOKEN_URL}"
+  client_id: "${CLIENT_ID}"
+  client_secret: "${CLIENT_SECRET}"
+
+steps:
+  - name: "Get Bearer Token"
+    description: "Obtain bearer token using OAuth2 client credentials"
+    request:
+      protocol: "http"
+      method: "POST"
+      url: "{{token_url}}/oauth/token"
+      headers:
+        Content-Type: "application/x-www-form-urlencoded"
+        Accept: "application/json"
+      body:
+        grant_type: "client_credentials"
+        client_id: "{{client_id}}"
+        client_secret: "{{client_secret}}"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json_path: "$.access_token"
+        type: "string"
+      - json_path: "$.token_type"
+        equals: "Bearer"
+      - json_path: "$.expires_in"
+        type: "number"
+    capture:
+      access_token: "$.access_token"
+      token_type: "$.token_type"
+      expires_in: "$.expires_in" 

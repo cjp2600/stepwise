@@ -1,0 +1,57 @@
+name: "Workflow with Imports Demo"
+version: "1.0"
+description: "Demonstrates how to use imported components in workflows"
+
+variables:
+  base_url: "https://api.example.com"
+  auth_url: "https://auth.example.com"
+  user_id: "123"
+  user_name: "John Doe"
+  user_email: "john@example.com"
+  user_role: "user"
+
+imports:
+  # Import basic authentication component
+  - path: "components/auth/basic-auth"
+    alias: "Login"
+    variables:
+      auth_url: "{{auth_url}}"
+    overrides:
+      name: "User Login"
+      request:
+        url: "{{auth_url}}/login"
+
+  # Import health check component
+  - path: "components/common/health-check"
+    alias: "API Health Check"
+    variables:
+      health_endpoint: "/status"
+
+  # Import user operations with overrides
+  - path: "components/api/user-operations"
+    alias: "User Management"
+    variables:
+      user_api_base: "/api/v1/users"
+    overrides:
+      request:
+        headers:
+          Authorization: "Bearer {{auth_token}}"
+
+steps:
+  # Custom step that uses imported variables
+  - name: "Custom User Validation"
+    description: "Validate user data after login"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{base_url}}/users/{{user_id}}/profile"
+      headers:
+        Accept: "application/json"
+        Authorization: "Bearer {{auth_token}}"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.user_id"
+        equals: "{{user_id}}"
+    capture:
+      profile_data: "$.profile" 

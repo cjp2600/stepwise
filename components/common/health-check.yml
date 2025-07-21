@@ -1,0 +1,26 @@
+name: "Health Check"
+version: "1.0"
+description: "Reusable health check step"
+type: "step"
+
+variables:
+  health_endpoint: "/health"
+
+steps:
+  - name: "API Health Check"
+    description: "Check if the API is healthy and responding"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{base_url}}{{health_endpoint}}"
+      headers:
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json: "$.id"
+        type: "number"
+      - time: "< 5000ms"
+    capture:
+      health_status: "$.status"
+      response_time: "$.response_time" 

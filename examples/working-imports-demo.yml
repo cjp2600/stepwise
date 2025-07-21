@@ -1,0 +1,35 @@
+name: "Working Imports Demo"
+version: "1.0"
+description: "Demonstrates imports with working APIs"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  test_user_id: "1"
+
+imports:
+  # Import health check component
+  - path: "components/common/health-check"
+    alias: "API Status Check"
+    variables:
+      health_endpoint: "/posts/1"
+
+steps:
+  # Custom step that uses the imported health check
+  - name: "Get User Data"
+    description: "Fetch user data after health check"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{base_url}}/users/{{test_user_id}}"
+      headers:
+        Accept: "application/json"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+      - json: "$.name"
+        type: "string"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email" 

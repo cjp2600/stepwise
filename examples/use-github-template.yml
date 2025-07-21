@@ -1,0 +1,32 @@
+name: "GitHub API Test"
+version: "1.0"
+description: "Test using GitHub API template"
+
+variables:
+  repo_owner: "microsoft"
+  repo_name: "vscode"
+
+imports:
+  - path: "examples/templates/github-api"
+    alias: "GitHub Repository Tests"
+    variables:
+      repo_owner: "{{repo_owner}}"
+      repo_name: "{{repo_name}}"
+
+steps:
+  - name: "Get Repository Contributors"
+    description: "Fetch repository contributors"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "https://api.github.com/repos/{{repo_owner}}/{{repo_name}}/contributors"
+      headers:
+        Accept: "application/vnd.github.v3+json"
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+    capture:
+      contributor_count: "$.length" 

@@ -1,0 +1,85 @@
+name: "User Operations"
+version: "1.0"
+description: "Common user operations (CRUD)"
+type: "workflow"
+
+variables:
+  user_api_base: "/users"
+
+steps:
+  - name: "Get User"
+    description: "Retrieve user information"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "{{base_url}}{{user_api_base}}/{{user_id}}"
+      headers:
+        Accept: "application/json"
+        Authorization: "Bearer {{auth_token}}"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.id"
+        type: "number"
+      - json_path: "$.name"
+        type: "string"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email"
+
+  - name: "Create User"
+    description: "Create a new user"
+    request:
+      protocol: "http"
+      method: "POST"
+      url: "{{base_url}}{{user_api_base}}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        Authorization: "Bearer {{auth_token}}"
+      body:
+        name: "{{user_name}}"
+        email: "{{user_email}}"
+        role: "{{user_role}}"
+      timeout: "5s"
+    validate:
+      - status: 201
+      - json_path: "$.id"
+        type: "number"
+      - json_path: "$.name"
+        equals: "{{user_name}}"
+    capture:
+      created_user_id: "$.id"
+
+  - name: "Update User"
+    description: "Update user information"
+    request:
+      protocol: "http"
+      method: "PUT"
+      url: "{{base_url}}{{user_api_base}}/{{user_id}}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        Authorization: "Bearer {{auth_token}}"
+      body:
+        name: "{{updated_name}}"
+        email: "{{updated_email}}"
+      timeout: "5s"
+    validate:
+      - status: 200
+      - json_path: "$.name"
+        equals: "{{updated_name}}"
+    capture:
+      updated_user_name: "$.name"
+
+  - name: "Delete User"
+    description: "Delete a user"
+    request:
+      protocol: "http"
+      method: "DELETE"
+      url: "{{base_url}}{{user_api_base}}/{{user_id}}"
+      headers:
+        Authorization: "Bearer {{auth_token}}"
+      timeout: "5s"
+    validate:
+      - status: 204 

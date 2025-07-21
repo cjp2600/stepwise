@@ -11,11 +11,14 @@ Stepwise is an open-source API testing framework written in Go, inspired by [Ste
 - **Language-Agnostic Configuration**: Support for YAML, JSON, and JavaScript configuration files
 - **Universal Protocol Support**: REST, GraphQL, gRPC, SOAP, and WebSocket APIs
 - **Multi-Step Workflows**: Chain requests together using captures and variables
+- **Component System**: Reusable templates and components with import functionality
 - **Data-Driven Testing**: Import test data or generate mock data
 - **Comprehensive Validation**: JSON Schema, XML, HTML validation with custom matchers
 - **Performance Testing**: Load testing capabilities with parallel execution
 - **Security Features**: SSL certificate validation, authentication support
 - **CI/CD Integration**: Works with GitHub Actions, GitLab CI, and more
+- **Colorful Output**: Colored terminal output with CI/CD compatibility
+- **Verbose Logging**: Detailed debug information with `--verbose` flag
 
 ## Quick Start
 
@@ -165,7 +168,110 @@ stepwise run workflow.yml --output html
 
 # Watch mode for development
 stepwise run workflow.yml --watch
+
+# Run with verbose logging
+stepwise run workflow.yml --verbose
+
+# Disable colors for CI
+NO_COLOR=1 stepwise run workflow.yml
 ```
+
+## Component System
+
+Stepwise supports reusable components and templates to eliminate code duplication and promote maintainability.
+
+### Creating Components
+
+Create reusable components in any directory:
+
+```yaml
+# components/auth/basic-auth.yml
+name: "Basic Authentication"
+version: "1.0"
+description: "Reusable basic authentication step"
+type: "step"
+
+variables:
+  auth_username: "${AUTH_USERNAME}"
+  auth_password: "${AUTH_PASSWORD}"
+
+steps:
+  - name: "Basic Auth Login"
+    request:
+      method: "POST"
+      url: "{{auth_url}}/login"
+      headers:
+        Content-Type: "application/json"
+      body:
+        username: "{{auth_username}}"
+        password: "{{auth_password}}"
+    validate:
+      - status: 200
+    capture:
+      auth_token: "$.token"
+```
+
+### Using Components
+
+Import components in your workflows:
+
+```yaml
+name: "API Test Suite"
+version: "1.0"
+
+imports:
+  # Basic import
+  - path: "components/auth/basic-auth"
+  
+  # Import with alias
+  - path: "components/auth/basic-auth"
+    alias: "User Login"
+  
+  # Import with variable overrides
+  - path: "components/auth/basic-auth"
+    variables:
+      auth_url: "https://custom-auth.com"
+  
+  # Import with request overrides
+  - path: "components/auth/basic-auth"
+    overrides:
+      request:
+        url: "{{custom_url}}/login"
+        headers:
+          X-Custom-Header: "{{custom_value}}"
+
+steps:
+  - name: "Test Protected Endpoint"
+    request:
+      method: "GET"
+      url: "{{api_url}}/protected"
+      headers:
+        Authorization: "Bearer {{auth_token}}"
+    validate:
+      - status: 200
+```
+
+### Component Types
+
+- **Step Components** (`type: "step"`): Single reusable steps
+- **Group Components** (`type: "group"`): Groups of related steps
+- **Workflow Components** (`type: "workflow"`): Complete workflows
+
+### Component Search Paths
+
+Stepwise searches for components in:
+1. Current directory (`.`)
+2. `./components` directory
+3. `./templates` directory
+4. `./examples/templates` directory
+5. Custom search paths
+
+### Example Templates
+
+See `examples/templates/` for ready-to-use templates:
+- `jsonplaceholder-api.yml` - JSONPlaceholder API testing
+- `github-api.yml` - GitHub API testing
+- `httpbin-api.yml` - HTTPBin API testing
 
 ## Validation Types
 

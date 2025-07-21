@@ -1,0 +1,38 @@
+name: "HTTPBin API Test"
+version: "1.0"
+description: "Test using HTTPBin template"
+
+imports:
+  - path: "examples/templates/httpbin-api"
+    alias: "HTTPBin Tests"
+
+steps:
+  - name: "Test Status Codes"
+    description: "Test different HTTP status codes"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "https://httpbin.org/status/200"
+      headers:
+        User-Agent: "Stepwise-Test-Suite"
+      timeout: "10s"
+    validate:
+      - status: 200
+
+  - name: "Test Headers"
+    description: "Test custom headers"
+    request:
+      protocol: "http"
+      method: "GET"
+      url: "https://httpbin.org/headers"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Stepwise-Test-Suite"
+        X-Custom-Header: "Stepwise-Test"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json: "$.headers.X-Custom-Header"
+        equals: "Stepwise-Test"
+    capture:
+      user_agent: "$.headers.User-Agent" 
