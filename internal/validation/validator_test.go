@@ -251,3 +251,82 @@ func TestExtractJSONValue(t *testing.T) {
 		t.Error("Should return error for non-existent path")
 	}
 }
+
+func TestValidateEmptyNilLen(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	response := &http.Response{
+		StatusCode: 200,
+		Body:       []byte(`{"empty_str":"","nonempty_str":"abc","empty_arr":[],"arr":[1,2],"empty_map":{},"map":{"a":1},"missing":null}`),
+		Duration:   10 * time.Millisecond,
+	}
+
+	// empty: true
+	rule := ValidationRule{JSON: "$.empty_str", Empty: boolPtr(true)}
+	result := validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected empty string to be empty")
+	}
+	rule = ValidationRule{JSON: "$.empty_arr", Empty: boolPtr(true)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected empty array to be empty")
+	}
+	rule = ValidationRule{JSON: "$.empty_map", Empty: boolPtr(true)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected empty map to be empty")
+	}
+
+	// empty: false
+	rule = ValidationRule{JSON: "$.nonempty_str", Empty: boolPtr(false)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected non-empty string to not be empty")
+	}
+	rule = ValidationRule{JSON: "$.arr", Empty: boolPtr(false)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected non-empty array to not be empty")
+	}
+	rule = ValidationRule{JSON: "$.map", Empty: boolPtr(false)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected non-empty map to not be empty")
+	}
+
+	// nil: true
+	rule = ValidationRule{JSON: "$.missing", Nil: boolPtr(true)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected missing to be nil")
+	}
+
+	// nil: false
+	rule = ValidationRule{JSON: "$.arr", Nil: boolPtr(false)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected arr to not be nil")
+	}
+
+	// len
+	rule = ValidationRule{JSON: "$.arr", Len: intPtr(2)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected arr to have len 2")
+	}
+	rule = ValidationRule{JSON: "$.nonempty_str", Len: intPtr(3)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected nonempty_str to have len 3")
+	}
+	rule = ValidationRule{JSON: "$.map", Len: intPtr(1)}
+	result = validator.validateJSON(response, rule)
+	if !result.Passed {
+		t.Errorf("Expected map to have len 1")
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+func intPtr(i int) *int    { return &i }

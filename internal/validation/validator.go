@@ -31,6 +31,9 @@ type ValidationRule struct {
 	Pattern  string      `yaml:"pattern" json:"pattern"`
 	Custom   string      `yaml:"custom" json:"custom"`
 	Value    string      `yaml:"value" json:"value"`
+	Empty    *bool       `yaml:"empty,omitempty" json:"empty,omitempty"` // true: must be empty, false: must not be empty
+	Nil      *bool       `yaml:"nil,omitempty" json:"nil,omitempty"`     // true: must be nil, false: must not be nil
+	Len      *int        `yaml:"len,omitempty" json:"len,omitempty"`     // length must be equal to this
 }
 
 // ValidationResult represents the result of a validation
@@ -156,6 +159,61 @@ func (v *Validator) validateJSON(response *http.Response, rule ValidationRule) V
 	}
 
 	// Apply validation based on rule type
+	if rule.Nil != nil {
+		isNil := value == nil
+		passed := isNil == *rule.Nil
+		return ValidationResult{
+			Type:     "nil",
+			Expected: *rule.Nil,
+			Actual:   isNil,
+			Passed:   passed,
+			Error:    v.getErrorMessage(passed, "nil", *rule.Nil, isNil),
+		}
+	}
+	if rule.Empty != nil {
+		isEmpty := false
+		switch val := value.(type) {
+		case nil:
+			isEmpty = true
+		case string:
+			isEmpty = val == ""
+		case []interface{}:
+			isEmpty = len(val) == 0
+		case map[string]interface{}:
+			isEmpty = len(val) == 0
+		default:
+			isEmpty = reflect.ValueOf(val).Len() == 0
+		}
+		passed := isEmpty == *rule.Empty
+		return ValidationResult{
+			Type:     "empty",
+			Expected: *rule.Empty,
+			Actual:   isEmpty,
+			Passed:   passed,
+			Error:    v.getErrorMessage(passed, "empty", *rule.Empty, isEmpty),
+		}
+	}
+	if rule.Len != nil {
+		var l int
+		switch val := value.(type) {
+		case string:
+			l = len(val)
+		case []interface{}:
+			l = len(val)
+		case map[string]interface{}:
+			l = len(val)
+		default:
+			l = reflect.ValueOf(val).Len()
+		}
+		passed := l == *rule.Len
+		return ValidationResult{
+			Type:     "len",
+			Expected: *rule.Len,
+			Actual:   l,
+			Passed:   passed,
+			Error:    v.getErrorMessage(passed, "len", *rule.Len, l),
+		}
+	}
 	if rule.Equals != nil {
 		return v.validateEquals(value, rule.Equals)
 	}

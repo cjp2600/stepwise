@@ -522,3 +522,21 @@ imports:
 ```
 
 This approach eliminates duplication and makes maintenance much easier. 
+
+### Validation Rules
+
+You can now use advanced validation rules for JSON values:
+
+```yaml
+validate:
+  - json: "$.data.items"
+    empty: false   # Проверка, что массив не пустой
+  - json: "$.data.items"
+    len: 3         # Проверка длины массива
+  - json: "$.optional"
+    nil: true      # Проверка, что значение nil (отсутствует)
+```
+
+- `empty: true|false` — значение пустое/не пустое (строка, массив, map, nil)
+- `nil: true|false` — значение nil/не nil
+- `len: N` — длина значения (строка, массив, map) равна N 
