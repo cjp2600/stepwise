@@ -278,12 +278,12 @@ func (a *App) printResults(results []workflow.TestResult) bool {
 		if result.Status == "passed" {
 			fmt.Printf("%s %s (%dms)\n",
 				a.colors.Green("✓"),
-				a.colors.Bold(result.Name),
+				a.colors.Cyan(a.colors.Bold(result.Name)),
 				duration)
 		} else {
 			fmt.Printf("%s %s (%dms) - %s\n",
 				a.colors.Red("✗"),
-				a.colors.Bold(result.Name),
+				a.colors.Cyan(a.colors.Bold(result.Name)),
 				duration,
 				a.colors.Red(result.Error))
 		}
