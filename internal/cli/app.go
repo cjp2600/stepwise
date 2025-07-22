@@ -280,13 +280,64 @@ func (a *App) printResults(results []workflow.TestResult) bool {
 				a.colors.Green("✓"),
 				a.colors.Bold(result.Name),
 				duration)
-			passed++
 		} else {
 			fmt.Printf("%s %s (%dms) - %s\n",
 				a.colors.Red("✗"),
 				a.colors.Bold(result.Name),
 				duration,
 				a.colors.Red(result.Error))
+		}
+
+		// Print validations for this step
+		if len(result.Validations) > 0 {
+			fmt.Println("  Validations:")
+			for _, v := range result.Validations {
+				icon := a.colors.Green("✓")
+				lineColor := a.colors.Green
+				if !v.Passed {
+					icon = a.colors.Red("✗")
+					lineColor = a.colors.Red
+				}
+				msg := fmt.Sprintf("    %s %s: expected %v, got %v", icon, v.Type, v.Expected, v.Actual)
+				if v.Error != "" && !v.Passed {
+					msg += " (" + v.Error + ")"
+				}
+				fmt.Println(lineColor(msg))
+			}
+		}
+
+		// Print repeat results if any
+		if result.RepeatCount > 0 && len(result.RepeatResults) > 0 {
+			for i, repeatResult := range result.RepeatResults {
+				icon := a.colors.Green("✓")
+				if repeatResult.Status != "passed" {
+					icon = a.colors.Red("✗")
+				}
+				fmt.Printf("  %s Iteration %d (%dms)\n", icon, i+1, int(repeatResult.Duration.Milliseconds()))
+				if repeatResult.Error != "" {
+					fmt.Printf("    %s %s\n", a.colors.Red("Error:"), a.colors.Red(repeatResult.Error))
+				}
+				if len(repeatResult.Validations) > 0 {
+					fmt.Println("    Validations:")
+					for _, v := range repeatResult.Validations {
+						icon := a.colors.Green("✓")
+						lineColor := a.colors.Green
+						if !v.Passed {
+							icon = a.colors.Red("✗")
+							lineColor = a.colors.Red
+						}
+						msg := fmt.Sprintf("      %s %s: expected %v, got %v", icon, v.Type, v.Expected, v.Actual)
+						if v.Error != "" && !v.Passed {
+							msg += " (" + v.Error + ")"
+						}
+						fmt.Println(lineColor(msg))
+					}
+				}
+			}
+		}
+		if result.Status == "passed" {
+			passed++
+		} else {
 			failed++
 		}
 	}

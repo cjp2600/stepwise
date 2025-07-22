@@ -542,6 +542,9 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 				validationResults, validationErr = e.validator.Validate(httpResponse, step.Validate)
 			}
 
+			// Always save validation results for CLI output
+			result.Validations = validationResults
+
 			if validationErr != nil {
 				validationErrors = append(validationErrors, validationErr.Error())
 			} else {
