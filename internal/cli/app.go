@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 
+	flag "github.com/spf13/pflag"
+
 	"github.com/cjp2600/stepwise/internal/config"
 	"github.com/cjp2600/stepwise/internal/logger"
 	"github.com/cjp2600/stepwise/internal/workflow"
@@ -32,48 +34,24 @@ func (a *App) Run(args []string) error {
 		return a.showHelp()
 	}
 
-	// Parse flags
-	verbose := false
-	var command string
+	// Find the command (first non-flag argument)
+	command := ""
 	var commandArgs []string
-
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
-
-		if strings.HasPrefix(arg, "--") {
-			switch arg {
-			case "--verbose":
-				verbose = true
-			case "--help", "-h":
-				return a.showHelp()
-			case "--version", "-v":
-				return a.showVersion()
-			default:
-				return fmt.Errorf("unknown flag: %s", arg)
-			}
-		} else if strings.HasPrefix(arg, "-") {
-			// Handle short flags
-			if strings.Contains(arg, "v") {
-				verbose = true
-			}
-			if strings.Contains(arg, "h") {
-				return a.showHelp()
-			}
-		} else {
-			// First non-flag argument is the command
-			if command == "" {
-				command = arg
-			} else {
-				commandArgs = append(commandArgs, arg)
-			}
+		if !strings.HasPrefix(arg, "-") && command == "" {
+			command = arg
+			// All subsequent args (including flags) go to the handler
+			commandArgs = args[i+1:]
+			break
 		}
-	}
-
-	// Set log level based on verbose flag
-	if verbose {
-		a.logger.SetLevel("debug")
-	} else {
-		a.logger.SetLevel("info")
+		// Global help/version
+		if arg == "--help" || arg == "-h" {
+			return a.showHelp()
+		}
+		if arg == "--version" || arg == "-v" {
+			return a.showVersion()
+		}
 	}
 
 	if command == "" {
@@ -136,35 +114,42 @@ func (a *App) handleRun(args []string) error {
 		return fmt.Errorf("workflow file path or directory is required")
 	}
 
-	path := args[0]
+	// Use pflag for flexible GNU-style flag parsing
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	parallelism := fs.IntP("parallel", "p", 1, "Number of parallel workflow executions")
+	_ = fs.Parse(args)
 
-	// Check if path is a directory or specific file
+	// Find the first non-flag argument as the path
+	path := ""
+	for _, arg := range fs.Args() {
+		if !strings.HasPrefix(arg, "-") {
+			path = arg
+			break
+		}
+	}
+	if path == "" {
+		return fmt.Errorf("workflow file path or directory is required")
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("failed to access path: %w", err)
 	}
 
 	if info.IsDir() {
-		// Run all workflows in directory recursively
 		runner := NewWorkflowRunner(a.config, a.logger)
-		return runner.RunWorkflows(path)
+		return runner.RunWorkflows(path, *parallelism)
 	} else {
-		// Run single workflow file
 		a.logger.Info("Running workflow", "file", path)
-
-		// Parse and execute workflow
 		wf, err := workflow.Load(path)
 		if err != nil {
 			return fmt.Errorf("failed to load workflow: %w", err)
 		}
-
 		executor := workflow.NewExecutor(a.config, a.logger)
 		results, err := executor.Execute(wf)
 		if err != nil {
 			return fmt.Errorf("workflow execution failed: %w", err)
 		}
-
-		// Print results and check for failures
 		hasFailures := a.printResults(results)
 		if hasFailures {
 			return fmt.Errorf("workflow execution completed with failures")

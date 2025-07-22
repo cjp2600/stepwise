@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cjp2600/stepwise/internal/config"
 	"github.com/cjp2600/stepwise/internal/logger"
@@ -28,7 +29,7 @@ func NewWorkflowRunner(cfg *config.Config, log *logger.Logger) *WorkflowRunner {
 }
 
 // RunWorkflows recursively runs all workflow files in the given path
-func (r *WorkflowRunner) RunWorkflows(path string) error {
+func (r *WorkflowRunner) RunWorkflows(path string, parallelism int) error {
 	workflowFiles, err := r.findWorkflowFiles(path)
 	if err != nil {
 		return fmt.Errorf("failed to find workflow files: %w", err)
@@ -41,35 +42,71 @@ func (r *WorkflowRunner) RunWorkflows(path string) error {
 
 	r.logger.Info("Found workflow files", "count", len(workflowFiles), "path", path)
 
+	type wfResult struct {
+		file    string
+		results []workflow.TestResult
+		err     error
+	}
+
+	resultsCh := make(chan wfResult, len(workflowFiles))
+
+	if parallelism <= 1 {
+		// Sequential (old behavior)
+		for _, file := range workflowFiles {
+			r.logger.Info("Running workflow", "file", file)
+			wf, err := workflow.Load(file)
+			if err != nil {
+				r.logger.Error("Failed to load workflow", "file", file, "error", err)
+				resultsCh <- wfResult{file: file, err: err}
+				continue
+			}
+			executor := workflow.NewExecutor(r.config, r.logger)
+			res, err := executor.Execute(wf)
+			resultsCh <- wfResult{file: file, results: res, err: err}
+		}
+	} else {
+		// Parallel worker pool
+		fileCh := make(chan string, len(workflowFiles))
+		for _, file := range workflowFiles {
+			fileCh <- file
+		}
+		close(fileCh)
+
+		var wg sync.WaitGroup
+		for i := 0; i < parallelism; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for file := range fileCh {
+					r.logger.Info("Running workflow", "file", file)
+					wf, err := workflow.Load(file)
+					if err != nil {
+						r.logger.Error("Failed to load workflow", "file", file, "error", err)
+						resultsCh <- wfResult{file: file, err: err}
+						continue
+					}
+					executor := workflow.NewExecutor(r.config, r.logger)
+					res, err := executor.Execute(wf)
+					resultsCh <- wfResult{file: file, results: res, err: err}
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	close(resultsCh)
+
 	totalResults := make([]workflow.TestResult, 0)
 	totalPassed := 0
 	totalFailed := 0
 	totalDuration := 0
 
-	for _, file := range workflowFiles {
-		r.logger.Info("Running workflow", "file", file)
-
-		// Load and execute workflow
-		wf, err := workflow.Load(file)
-		if err != nil {
-			r.logger.Error("Failed to load workflow", "file", file, "error", err)
+	for rres := range resultsCh {
+		if rres.err != nil {
 			totalFailed++
 			continue
 		}
-
-		executor := workflow.NewExecutor(r.config, r.logger)
-		results, err := executor.Execute(wf)
-		if err != nil {
-			r.logger.Error("Workflow execution failed", "file", file, "error", err)
-			totalFailed++
-			continue
-		}
-
-		// Print individual workflow results
-		r.printWorkflowResults(file, results)
-
-		// Aggregate results
-		for _, result := range results {
+		r.printWorkflowResults(rres.file, rres.results)
+		for _, result := range rres.results {
 			totalResults = append(totalResults, result)
 			if result.Status == "passed" {
 				totalPassed++
@@ -80,10 +117,8 @@ func (r *WorkflowRunner) RunWorkflows(path string) error {
 		}
 	}
 
-	// Print summary
 	r.printSummary(len(workflowFiles), totalPassed, totalFailed, totalDuration)
 
-	// Return error if there were failures
 	if totalFailed > 0 {
 		return fmt.Errorf("workflow execution completed with %d failures", totalFailed)
 	}
