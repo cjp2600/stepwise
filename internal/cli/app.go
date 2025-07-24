@@ -132,7 +132,14 @@ func (a *App) handleRun(args []string) error {
 		}
 	}
 	if path == "" {
-		return fmt.Errorf("workflow file path or directory is required")
+		fmt.Printf("%s %s\n", a.colors.Red("[ERROR]"), a.colors.Red("workflow file path or directory is required"))
+		os.Exit(1)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("%s %s: %v\n", a.colors.Red("[ERROR]"), a.colors.Red("Failed to access path"), err)
+		os.Exit(1)
 	}
 
 	// Set verbose mode
@@ -141,11 +148,6 @@ func (a *App) handleRun(args []string) error {
 		a.logger.SetLevel("debug")
 	} else {
 		a.logger.SetMuteMode(true)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("failed to access path: %w", err)
 	}
 
 	if info.IsDir() {
