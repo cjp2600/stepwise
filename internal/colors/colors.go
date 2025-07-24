@@ -71,3 +71,27 @@ func (c *Colors) Dim(text string) string {
 	}
 	return fmt.Sprintf("\033[2m%s\033[0m", text)
 }
+
+// Spinner methods
+func (c *Colors) SpinnerFrame(frame int) string {
+	if !c.enabled {
+		return ""
+	}
+
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	return frames[frame%len(frames)]
+}
+
+func (c *Colors) SpinnerColor(frame int) string {
+	if !c.enabled {
+		return ""
+	}
+
+	colors := []string{"\033[36m", "\033[35m", "\033[34m", "\033[33m", "\033[32m", "\033[31m"}
+	color := colors[frame%len(colors)]
+	return fmt.Sprintf("%s%s\033[0m", color, c.SpinnerFrame(frame))
+}
+
+func (c *Colors) IsEnabled() bool {
+	return c.enabled
+}

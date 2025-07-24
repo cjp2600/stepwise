@@ -38,8 +38,11 @@ Execute a workflow file or directory.
 # Run a single workflow file
 stepwise run workflow.yml
 
-# Run all workflows in a directory
+# Run all workflows in a directory (non-recursive)
 stepwise run test-workflows/
+
+# Run all workflows in a directory recursively
+stepwise run test-workflows/ -r
 
 # Run with verbose output
 stepwise run workflow.yml --verbose
@@ -98,6 +101,7 @@ Options:
   --env ENV              Environment name (loads .env.ENV file)
   --var KEY=VALUE        Set custom variables
   --parallel N           Run workflows in parallel (default: 1)
+  -r, --recursive        Search recursively in subdirectories
   --output FORMAT        Output format (text, json, html, junit)
   --watch                Watch for file changes and re-run
   --dry-run             Validate without executing
@@ -166,8 +170,11 @@ stepwise run examples/simple-test.yml \
 ### Advanced Usage
 
 ```bash
-# Run multiple workflows in parallel
+# Run multiple workflows in parallel (non-recursive)
 stepwise run test-workflows/ --parallel 4
+
+# Run multiple workflows in parallel (recursive)
+stepwise run test-workflows/ --parallel 4 -r
 
 # Run with environment-specific config
 stepwise run workflow.yml --env staging

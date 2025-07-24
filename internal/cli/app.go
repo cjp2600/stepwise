@@ -117,6 +117,7 @@ func (a *App) handleRun(args []string) error {
 	// Use pflag for flexible GNU-style flag parsing
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	parallelism := fs.IntP("parallel", "p", 1, "Number of parallel workflow executions")
+	recursive := fs.BoolP("recursive", "r", false, "Search recursively in subdirectories")
 	_ = fs.Parse(args)
 
 	// Find the first non-flag argument as the path
@@ -138,18 +139,27 @@ func (a *App) handleRun(args []string) error {
 
 	if info.IsDir() {
 		runner := NewWorkflowRunner(a.config, a.logger)
-		return runner.RunWorkflows(path, *parallelism)
+		return runner.RunWorkflows(path, *parallelism, *recursive)
 	} else {
+		spinner := NewSpinner(a.colors, "Loading workflow...")
+		spinner.Start()
+
 		a.logger.Info("Running workflow", "file", path)
 		wf, err := workflow.Load(path)
 		if err != nil {
+			spinner.Error("Failed to load workflow")
 			return fmt.Errorf("failed to load workflow: %w", err)
 		}
+
+		spinner.UpdateMessage("Executing workflow...")
 		executor := workflow.NewExecutor(a.config, a.logger)
 		results, err := executor.Execute(wf)
 		if err != nil {
+			spinner.Error("Workflow execution failed")
 			return fmt.Errorf("workflow execution failed: %w", err)
 		}
+
+		spinner.Success("Workflow completed successfully")
 		hasFailures := a.printResults(results)
 		if hasFailures {
 			return fmt.Errorf("workflow execution completed with failures")
@@ -210,7 +220,7 @@ Usage:
 
 Commands:
   init                    Initialize a new Stepwise project
-  run <path>             Run workflow file or directory (recursive)
+  run <path>             Run workflow file or directory
   validate <workflow>    Validate a workflow file
   info <workflow>        Show workflow information
   generate               Generate test data
@@ -226,21 +236,24 @@ Options:
   %s              Enable verbose logging
   --quiet                Enable quiet mode
   --watch                Watch mode for file changes
+  -r, --recursive        Search recursively in subdirectories
 
 Examples:
   stepwise init
   stepwise run workflow.yml                    # Run single file
-  stepwise run ./examples                     # Run all workflows in directory
+  stepwise run ./examples                     # Run all workflows in directory (non-recursive)
+  stepwise run ./examples -r                  # Run all workflows recursively
   stepwise run .                             # Run all workflows in current directory
-  stepwise run ./...                         # Run all workflows recursively
+  stepwise run . -r                          # Run all workflows recursively
   stepwise run workflow.yml --env production
   stepwise validate workflow.yml
   stepwise info workflow.yml
 
-Recursive Execution:
+Directory Execution:
   When running a directory, Stepwise will:
-  - Find all .yml and .yaml files recursively
-  - Skip common directories (.git, node_modules, etc.)
+  - By default: Find all .yml and .yaml files in the specified directory only
+  - With -r flag: Find all .yml and .yaml files recursively in subdirectories
+  - Skip common directories (.git, node_modules, etc.) when recursive
   - Execute each workflow file
   - Provide individual and overall summaries
 

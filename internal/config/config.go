@@ -22,7 +22,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		LogLevel:    getEnv("STEPWISE_LOG_LEVEL", "info"),
-		Timeout:     getEnvDuration("STEPWISE_TIMEOUT", 30*time.Second),
+		Timeout:     getEnvDuration("STEPWISE_TIMEOUT", 10*time.Second),
 		Parallel:    getEnvInt("STEPWISE_PARALLEL", 1),
 		Environment: getEnv("STEPWISE_ENV", "development"),
 		Output:      getEnv("STEPWISE_OUTPUT", "console"),

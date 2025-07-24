@@ -14,32 +14,41 @@ import (
 
 // WorkflowRunner handles recursive workflow execution
 type WorkflowRunner struct {
-	config *config.Config
-	logger *logger.Logger
-	colors *Colors
+	config  *config.Config
+	logger  *logger.Logger
+	colors  *Colors
+	spinner *Spinner
 }
 
 // NewWorkflowRunner creates a new workflow runner
 func NewWorkflowRunner(cfg *config.Config, log *logger.Logger) *WorkflowRunner {
+	colors := NewColors()
 	return &WorkflowRunner{
-		config: cfg,
-		logger: log,
-		colors: NewColors(),
+		config:  cfg,
+		logger:  log,
+		colors:  colors,
+		spinner: NewSpinner(colors, "Initializing..."),
 	}
 }
 
-// RunWorkflows recursively runs all workflow files in the given path
-func (r *WorkflowRunner) RunWorkflows(path string, parallelism int) error {
-	workflowFiles, err := r.findWorkflowFiles(path)
+// RunWorkflows runs all workflow files in the given path
+func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bool) error {
+	r.spinner.UpdateMessage("Searching for workflow files...")
+	r.spinner.Start()
+
+	workflowFiles, err := r.findWorkflowFiles(path, recursive)
 	if err != nil {
+		r.spinner.Error("Failed to find workflow files")
 		return fmt.Errorf("failed to find workflow files: %w", err)
 	}
 
 	if len(workflowFiles) == 0 {
+		r.spinner.Info("No workflow files found")
 		r.logger.Info("No workflow files found", "path", path)
 		return nil
 	}
 
+	r.spinner.Success(fmt.Sprintf("Found %d workflow files", len(workflowFiles)))
 	r.logger.Info("Found workflow files", "count", len(workflowFiles), "path", path)
 
 	type wfResult struct {
@@ -52,20 +61,34 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int) error {
 
 	if parallelism <= 1 {
 		// Sequential (old behavior)
-		for _, file := range workflowFiles {
+		for i, file := range workflowFiles {
+			r.spinner.UpdateMessage(fmt.Sprintf("Running workflow %d/%d: %s", i+1, len(workflowFiles), filepath.Base(file)))
+			r.spinner.Start()
+
 			r.logger.Info("Running workflow", "file", file)
 			wf, err := workflow.Load(file)
 			if err != nil {
+				r.spinner.Error(fmt.Sprintf("Failed to load workflow: %s", filepath.Base(file)))
 				r.logger.Error("Failed to load workflow", "file", file, "error", err)
 				resultsCh <- wfResult{file: file, err: err}
 				continue
 			}
 			executor := workflow.NewExecutor(r.config, r.logger)
 			res, err := executor.Execute(wf)
+
+			if err != nil {
+				r.spinner.Error(fmt.Sprintf("Workflow failed: %s", filepath.Base(file)))
+			} else {
+				r.spinner.Success(fmt.Sprintf("Workflow completed: %s", filepath.Base(file)))
+			}
+
 			resultsCh <- wfResult{file: file, results: res, err: err}
 		}
 	} else {
 		// Parallel worker pool
+		r.spinner.UpdateMessage(fmt.Sprintf("Running %d workflows in parallel (%d workers)", len(workflowFiles), parallelism))
+		r.spinner.Start()
+
 		fileCh := make(chan string, len(workflowFiles))
 		for _, file := range workflowFiles {
 			fileCh <- file
@@ -73,6 +96,9 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int) error {
 		close(fileCh)
 
 		var wg sync.WaitGroup
+		completed := 0
+		var mu sync.Mutex
+
 		for i := 0; i < parallelism; i++ {
 			wg.Add(1)
 			go func() {
@@ -83,17 +109,31 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int) error {
 					if err != nil {
 						r.logger.Error("Failed to load workflow", "file", file, "error", err)
 						resultsCh <- wfResult{file: file, err: err}
+
+						mu.Lock()
+						completed++
+						r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
+						mu.Unlock()
 						continue
 					}
 					executor := workflow.NewExecutor(r.config, r.logger)
 					res, err := executor.Execute(wf)
 					resultsCh <- wfResult{file: file, results: res, err: err}
+
+					mu.Lock()
+					completed++
+					r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
+					mu.Unlock()
 				}
 			}()
 		}
 		wg.Wait()
+		r.spinner.Success(fmt.Sprintf("All %d workflows completed", len(workflowFiles)))
 	}
 	close(resultsCh)
+
+	r.spinner.UpdateMessage("Processing results...")
+	r.spinner.Start()
 
 	totalResults := make([]workflow.TestResult, 0)
 	totalPassed := 0
@@ -117,6 +157,8 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int) error {
 		}
 	}
 
+	r.spinner.Success("Results processed successfully")
+
 	r.printSummary(len(workflowFiles), totalPassed, totalFailed, totalDuration)
 
 	if totalFailed > 0 {
@@ -126,32 +168,49 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int) error {
 	return nil
 }
 
-// findWorkflowFiles recursively finds all workflow files in the given path
-func (r *WorkflowRunner) findWorkflowFiles(path string) ([]string, error) {
+// findWorkflowFiles finds all workflow files in the given path
+func (r *WorkflowRunner) findWorkflowFiles(path string, recursive bool) ([]string, error) {
 	var files []string
 
-	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories that should be ignored
-		if info.IsDir() {
-			if r.shouldSkipDirectory(filePath) {
-				return filepath.SkipDir
+	if recursive {
+		// Recursive search using filepath.Walk
+		err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
 			}
+
+			// Skip directories that should be ignored
+			if info.IsDir() {
+				if r.shouldSkipDirectory(filePath) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			// Check if file is a workflow file
+			if r.isWorkflowFile(filePath) {
+				files = append(files, filePath)
+			}
+
 			return nil
+		})
+
+		return files, err
+	} else {
+		// Non-recursive search - only files in the specified directory
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return nil, err
 		}
 
-		// Check if file is a workflow file
-		if r.isWorkflowFile(filePath) {
-			files = append(files, filePath)
+		for _, entry := range entries {
+			if !entry.IsDir() && r.isWorkflowFile(filepath.Join(path, entry.Name())) {
+				files = append(files, filepath.Join(path, entry.Name()))
+			}
 		}
 
-		return nil
-	})
-
-	return files, err
+		return files, nil
+	}
 }
 
 // shouldSkipDirectory checks if a directory should be skipped
