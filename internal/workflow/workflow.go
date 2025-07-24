@@ -39,6 +39,7 @@ type Workflow struct {
 	Steps       []Step                 `yaml:"steps" json:"steps"`
 	Groups      []StepGroup            `yaml:"groups" json:"groups"`
 	Captures    map[string]string      `yaml:"captures,omitempty" json:"captures,omitempty"` // Global captures for the workflow
+	SourceFile  string                 `yaml:"-" json:"-"`                                   // путь к исходному workflow-файлу (не сериализуется)
 }
 
 // StepGroup represents a group of steps that can be executed together
@@ -187,6 +188,9 @@ func LoadWithImports(filename string, searchPaths []string) (*Workflow, error) {
 		workflow.Variables = make(map[string]interface{})
 	}
 
+	// Сохраняем путь к исходному workflow-файлу
+	workflow.SourceFile = filename
+
 	// Resolve imports if any
 	if len(workflow.Imports) > 0 {
 		// Get the directory of the workflow file for relative imports
@@ -214,11 +218,8 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	componentMap := make(map[string]StepWithVars)
 	// Получаем директорию workflow-файла для корректного поиска компонентов
 	workflowDir := ""
-	if wf != nil && len(wf.Imports) > 0 {
-		if len(os.Args) > 2 {
-			workflowPath := os.Args[2]
-			workflowDir = filepath.Dir(workflowPath)
-		}
+	if wf != nil && wf.SourceFile != "" {
+		workflowDir = filepath.Dir(wf.SourceFile)
 	}
 	searchPaths := []string{}
 	if workflowDir != "" {
