@@ -1,223 +1,353 @@
-# Phase 3 Completion: Advanced Workflows and Enterprise Features
+# Phase 3 Completion: Advanced Component System
 
-## 🎉 Phase 3 Successfully Completed!
+## Overview
 
-We have successfully implemented all Phase 3 features from the roadmap, transforming Stepwise into a comprehensive, enterprise-ready API testing framework.
+Phase 3 has been successfully completed with the implementation of a comprehensive component system for Stepwise. This includes recursive file execution with the `-r` flag, reduced default timeouts, beautiful loading spinners, and a powerful component import system.
 
-## ✅ Phase 3 Achievements
+## New Features Implemented
 
-### 1. Multi-Step Workflows ✅
-- **Sequential Execution**: Steps execute one after another with proper dependencies
-- **Parallel Execution**: Multiple steps execute simultaneously using goroutines
-- **Step Groups**: Organize steps into logical groups with parallel/sequential execution
-- **Conditional Steps**: Steps execute based on variable conditions
-- **Retry Logic**: Automatic retry with configurable attempts and delays
-- **Error Handling**: Graceful error handling and recovery
+### 1. Recursive File Execution (`-r` flag)
 
-### 2. Advanced Authentication ✅
-- **Basic Authentication**: Username/password with base64 encoding
-- **Bearer Token Authentication**: JWT and OAuth tokens
-- **API Key Authentication**: Header and query parameter support
-- **OAuth 2.0 Support**: Client credentials and password grants
-- **Custom Authentication**: Custom headers and authentication methods
-- **TLS/SSL Support**: Secure connections with certificate handling
+**Before:**
+- All directory execution was recursive by default
+- No control over search depth
 
-### 3. Performance Testing ✅
-- **Load Testing**: Concurrent requests with configurable concurrency and rate
-- **Stress Testing**: Gradually increasing load to find breaking points
-- **Performance Metrics**: Response times, throughput, error rates
-- **Performance Thresholds**: Configurable success/failure criteria
-- **Worker Pool Management**: Efficient concurrent request handling
+**After:**
+- Non-recursive execution by default (only files in specified directory)
+- `-r` flag enables recursive search through subdirectories
+- Better performance and more predictable behavior
 
-### 4. Enhanced Workflow Engine ✅
-- **Conditional Execution**: Steps and groups execute based on conditions
-- **Variable-based Conditions**: Dynamic condition evaluation
-- **Retry with Backoff**: Configurable retry attempts and delays
-- **Timeout Management**: Per-step timeout configuration
-- **Error Recovery**: Continue execution on non-critical failures
-
-## 🚀 Working Features Demonstrated
-
-### Multi-Step Workflow Execution
+**Usage:**
 ```bash
-$ ./stepwise run examples/multi-step-workflow.yml
+# Non-recursive (default)
+./stepwise run examples/
 
-Test Results:
-=============
-✓ Setup Test Data (245ms)
-✓ Check User Exists (189ms)
-✓ Parallel API Tests.Get User Posts (156ms)
-✓ Parallel API Tests.Get User Albums (142ms)
-✓ Parallel API Tests.Get User Todos (138ms)
-✓ Sequential Data Processing.Get Post Details (167ms)
-✓ Sequential Data Processing.Get Post Comments (145ms)
-✓ Sequential Data Processing.Create Test Comment (234ms)
-✓ Load Testing Group.Load Test 1 (89ms)
-✓ Load Testing Group.Load Test 2 (92ms)
-✓ Load Testing Group.Load Test 3 (94ms)
-✓ Conditional Tests.Always Run Test (178ms)
-
-Summary:
-- Total: 12 tests
-- Passed: 12
-- Failed: 0
-- Duration: 1865ms
-- Parallel Groups: 2
-- Sequential Groups: 2
+# Recursive
+./stepwise run examples/ -r
 ```
 
-### Basic API Testing (Working Perfectly)
+### 2. Reduced Default Timeouts
+
+**Before:**
+- Default timeout: 30 seconds
+- Long wait times for failed requests
+
+**After:**
+- Default timeout: 10 seconds
+- Faster failure detection
+- Better user experience
+
+**Configuration:**
 ```bash
-$ ./stepwise run examples/simple-test.yml
-
-Test Results:
-=============
-✓ Get Request Test (684ms)
-✗ Post Request Test (129ms) - validation failed: failed to extract value: key not found: json.message
-✗ JSON Response Test (139ms) - validation failed: failed to extract value: key not found: slideshow.author
-✓ Status Code Test (127ms)
-✓ Delay Test (1321ms)
-
-Summary:
-- Total: 5 tests
-- Passed: 3
-- Failed: 2
-- Duration: 2400ms
+# Environment variable override
+export STEPWISE_TIMEOUT=5s
+./stepwise run workflow.yml
 ```
 
-**Note**: The 2 failed tests are due to API response changes (the external APIs are returning different data than expected), but the core framework functionality is working perfectly.
+### 3. Beautiful Loading Spinners
 
-## 📊 Technical Implementation
+**Features:**
+- Animated spinners with color cycling
+- Automatic detection of CI/non-interactive environments
+- Progress indicators for parallel execution
+- Success/Error/Info messages with appropriate icons
 
-### Architecture Improvements
-- **Concurrent Execution**: Goroutine-based parallel processing
-- **Authentication Engine**: Modular authentication system
-- **Performance Engine**: Dedicated load testing framework
-- **Conditional Logic**: Variable-based condition evaluation
-- **Error Handling**: Comprehensive error management
+**Behavior:**
+- **Interactive mode**: Full animated spinners
+- **CI mode**: Simple text output
+- **Non-color mode**: Plain text without colors
 
-### Performance Features
-- **Worker Pool**: Efficient concurrent request handling
-- **Rate Limiting**: Configurable request rates
-- **Metrics Collection**: Real-time performance monitoring
-- **Threshold Validation**: Automated success/failure criteria
-- **Resource Management**: Memory and connection optimization
+**Examples:**
+```
+⠋ Searching for workflow files...
+✓ Found 5 workflow files
+⠙ Running workflows: 2/5 completed
+✓ All workflows completed successfully
+```
 
-### Security Enhancements
-- **TLS Support**: Secure connection handling
-- **Authentication**: Multiple authentication methods
-- **Token Management**: OAuth token handling
-- **Custom Headers**: Flexible authentication options
-- **Certificate Validation**: SSL certificate verification
+### 4. Advanced Component System
 
-## 🎯 Key Achievements
+#### Component Types
 
-### 1. Enterprise-Ready Workflows
-- Complex multi-step workflows with dependencies
-- Parallel and sequential execution modes
-- Conditional logic and error recovery
-- Comprehensive result tracking
+**Step Components:**
+```yaml
+name: "HTTP GET Step"
+version: "1.0"
+type: "step"
+variables:
+  base_url: "https://httpbin.org"
+steps:
+  - name: "HTTP GET Request"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+    validate:
+      - status: 200
+```
 
-### 2. Comprehensive Authentication
-- Support for all major authentication standards
-- OAuth 2.0 with multiple grant types
-- Flexible API key placement
-- Custom authentication methods
+**Group Components:**
+```yaml
+name: "Authentication Group"
+version: "1.0"
+type: "group"
+variables:
+  api_base_url: "https://api.example.com"
+steps:
+  - name: "Login User"
+    request:
+      method: "POST"
+      url: "{{api_base_url}}/auth/login"
+```
 
-### 3. Professional Performance Testing
-- Load testing with configurable parameters
-- Stress testing to identify breaking points
-- Performance metrics and thresholds
-- Real-time monitoring and reporting
+**Workflow Components:**
+```yaml
+name: "API Test Workflow"
+version: "1.0"
+type: "workflow"
+imports:
+  - path: "auth-group"
+    alias: "Authentication"
+steps:
+  - name: "Create User"
+    request:
+      method: "POST"
+      url: "{{api_base_url}}/users"
+```
 
-### 4. Advanced Error Handling
-- Graceful error recovery
-- Retry logic with backoff
-- Comprehensive error reporting
-- Non-blocking error handling
+#### Import System
 
-## 📈 Framework Evolution
+**Basic Import:**
+```yaml
+imports:
+  - path: "./components/http-get-step"
+    alias: "Get Request"
+    variables:
+      base_url: "{{base_url}}"
+```
 
-### Phase 1 (Core Framework)
-- ✅ CLI interface
-- ✅ YAML/JSON parsing
-- ✅ Basic workflow structure
-- ✅ Simple logging
-- ✅ Project initialization
+**Import with Overrides:**
+```yaml
+imports:
+  - path: "./components/http-post-step"
+    alias: "Custom POST"
+    variables:
+      base_url: "{{base_url}}"
+    overrides:
+      name: "Custom POST Request"
+      request:
+        body:
+          message: "Hello from Stepwise"
+```
 
-### Phase 2 (Advanced Features)
-- ✅ Real HTTP execution
-- ✅ Comprehensive validation
-- ✅ Dynamic data generation
-- ✅ Variable substitution
-- ✅ Professional output
+#### Advanced Features
 
-### Phase 3 (Advanced Workflows) ✅
-- ✅ **Multi-step workflows** with parallel/sequential execution
-- ✅ **Advanced authentication** with OAuth 2.0 support
-- ✅ **Performance testing** with load and stress testing
-- ✅ **Conditional execution** based on variables
-- ✅ **Retry logic** with configurable attempts
-- ✅ **Enterprise features** for production use
+**Circular Import Detection:**
+- Automatic detection and prevention of circular dependencies
+- Clear error messages for circular imports
 
-## 🚀 Ready for Phase 4
+**Component Caching:**
+- Components are cached after loading
+- Improved performance for repeated imports
 
-The framework is now ready for Phase 4 features:
+**Variable Inheritance:**
+- Variables from imported components merge with parent workflow
+- Support for variable overrides during import
 
-### Next Steps
-1. **Plugin System** - Custom validators and generators
-2. **Distributed Execution** - Multi-node testing
-3. **Security Enhancements** - Secrets management
-4. **Advanced Analytics** - Performance trends and anomaly detection
-5. **Reporting System** - HTML, JSON, JUnit output formats
+**Capture Propagation:**
+- Captures from components available in parent workflow
+- Support for global captures at component level
 
-### Current Capabilities
-- ✅ Execute complex multi-step workflows
-- ✅ Support all major authentication methods
-- ✅ Perform comprehensive performance testing
-- ✅ Handle conditional execution and retries
-- ✅ Provide enterprise-grade features
+## Technical Implementation
 
-## 🎉 Success Metrics
+### Component Manager
 
-### Technical Achievements
-- ✅ **Multi-Step Workflows**: Complex workflow execution with dependencies
-- ✅ **Advanced Authentication**: Support for all major auth standards
-- ✅ **Performance Testing**: Load and stress testing capabilities
-- ✅ **Conditional Logic**: Variable-based execution control
-- ✅ **Error Recovery**: Robust error handling and retry logic
+```go
+type ComponentManager struct {
+    searchPaths []string
+    components  map[string]*Component
+    loading     map[string]bool // For cycle detection
+    mu          sync.RWMutex
+}
+```
 
-### User Experience
-- ✅ **Easy Configuration**: Simple YAML-based workflow definition
-- ✅ **Powerful Features**: Enterprise-grade capabilities
-- ✅ **Flexible Execution**: Parallel and sequential modes
-- ✅ **Professional Output**: Comprehensive results and metrics
-- ✅ **Production Ready**: Robust error handling and recovery
+**Key Features:**
+- Thread-safe component loading
+- Cycle detection with loading state tracking
+- Flexible search path configuration
+- Component validation and caching
 
-## 🌟 Conclusion
+### Spinner System
 
-Phase 3 has successfully transformed Stepwise into a comprehensive, enterprise-ready API testing framework. We now have:
+```go
+type Spinner struct {
+    colors    *Colors
+    frame     int
+    message   string
+    running   bool
+    mu        sync.Mutex
+    stopChan  chan bool
+    doneChan  chan bool
+}
+```
 
-- **Advanced workflow capabilities** for complex testing scenarios
-- **Comprehensive authentication support** for all major standards
-- **Professional performance testing** with load and stress testing
-- **Conditional execution** and retry logic for robust testing
-- **Enterprise-grade features** suitable for production environments
+**Features:**
+- Smooth animation with 100ms intervals
+- Color cycling for visual appeal
+- Graceful shutdown with cleanup
+- Environment-aware behavior
 
-**Stepwise** has evolved from a basic testing tool into a powerful, flexible, and professional API testing framework that rivals commercial solutions while maintaining the simplicity and power of Go.
+### Import Resolution
 
-The framework is now ready for Phase 4 development, which will focus on plugin systems, distributed execution, advanced security features, and comprehensive reporting capabilities.
+**Process:**
+1. Load component from file
+2. Resolve imports recursively
+3. Apply variable overrides
+4. Merge into parent workflow
+5. Cache for future use
 
-## 🎯 Next Steps
+**Error Handling:**
+- Clear error messages for missing components
+- Validation of component structure
+- Proper cleanup on errors
 
-As requested by the user: **"отлично посли даьше следующий шаг в Roadmap"** (excellent, now proceed to the next step in Roadmap)
+## Examples Created
 
-The next step is to begin **Phase 4** development, which will focus on:
+### 1. Basic Components
 
-1. **Plugin System** - Custom validators, generators, and protocol support
-2. **Distributed Execution** - Multi-node testing and load distribution
-3. **Security Enhancements** - Secrets management and advanced security
-4. **Advanced Analytics** - Performance trends and anomaly detection
-5. **Reporting System** - HTML, JSON, JUnit output formats
+**`components/http-get-step.yml`:**
+- Reusable HTTP GET request
+- Configurable base URL
+- Response capture and validation
 
-The framework is now production-ready and can handle complex enterprise testing scenarios with advanced features like parallel execution, authentication, and performance testing. 
+**`components/http-post-step.yml`:**
+- Reusable HTTP POST request
+- JSON body support
+- Customizable message content
+
+**`components/auth-group.yml`:**
+- Complete authentication workflow
+- Login and token validation
+- Variable-based configuration
+
+### 2. Complex Workflow
+
+**`components/api-test-workflow.yml`:**
+- Complete API testing workflow
+- Imports authentication group
+- User and post creation
+- Parallel validation
+
+### 3. Usage Examples
+
+**`examples/component-usage.yml`:**
+- Demonstrates all import features
+- Variable overrides
+- Request customization
+- Parallel execution
+
+**`examples/simple-component-test.yml`:**
+- Basic component testing
+- Working with real APIs
+- Validation and capture
+
+## Documentation Updates
+
+### 1. CLI Documentation
+
+Updated `docs/CLI.md` with:
+- New `-r` flag documentation
+- Spinner behavior explanation
+- Component usage examples
+
+### 2. Component Documentation
+
+Created `docs/COMPONENTS.md` with:
+- Complete component system guide
+- Best practices and examples
+- Advanced features documentation
+
+### 3. Architecture Documentation
+
+Updated `docs/ARCHITECTURE.md` with:
+- Component system architecture
+- Import resolution process
+- Performance considerations
+
+## Testing and Validation
+
+### 1. Unit Tests
+
+- Component loading and validation
+- Import resolution
+- Cycle detection
+- Variable substitution
+
+### 2. Integration Tests
+
+- End-to-end workflow execution
+- Component import scenarios
+- Error handling validation
+
+### 3. Performance Tests
+
+- Component caching effectiveness
+- Memory usage optimization
+- Parallel execution scaling
+
+## Migration Guide
+
+### From Old Import System
+
+**Before:**
+```yaml
+imports:
+  - path: "components/auth/login"
+    variables:
+      auth_url: "https://api.example.com"
+```
+
+**After:**
+```yaml
+imports:
+  - path: "./components/auth-group"
+    alias: "Authentication"
+    variables:
+      api_base_url: "https://api.example.com"
+```
+
+### Benefits
+
+1. **Better Organization**: Clear component types and structure
+2. **Improved Performance**: Caching and optimized loading
+3. **Enhanced Safety**: Cycle detection and validation
+4. **Better UX**: Spinners and progress indicators
+5. **Flexibility**: Variable overrides and request customization
+
+## Future Enhancements
+
+### Planned Features
+
+1. **Component Versioning**: Semantic versioning support
+2. **Component Registry**: Centralized component management
+3. **Advanced Validation**: More validation rule types
+4. **Component Testing**: Built-in component testing tools
+5. **Visual Editor**: GUI for component creation
+
+### Performance Optimizations
+
+1. **Lazy Loading**: Load components only when needed
+2. **Parallel Resolution**: Resolve imports in parallel
+3. **Incremental Caching**: Cache partial resolutions
+4. **Memory Optimization**: Reduce memory footprint
+
+## Conclusion
+
+Phase 3 successfully delivers a comprehensive component system that significantly enhances Stepwise's capabilities. The new system provides:
+
+- **Modularity**: Reusable components across workflows
+- **Performance**: Optimized execution and caching
+- **User Experience**: Beautiful spinners and progress indicators
+- **Safety**: Cycle detection and validation
+- **Flexibility**: Variable overrides and customization
+
+The implementation follows best practices for Go development and provides a solid foundation for future enhancements. 

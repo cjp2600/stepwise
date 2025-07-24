@@ -91,9 +91,10 @@ func (s *Spinner) Stop() {
 	s.stopChan <- true
 	<-s.doneChan
 
-	// Clear the line
+	// Clear the line and move to next line
 	fmt.Print("\r")
 	fmt.Print("\033[K") // Clear line
+	fmt.Println()       // Move to next line
 }
 
 // UpdateMessage updates the spinner message
@@ -130,5 +131,32 @@ func (s *Spinner) Info(message string) {
 		fmt.Printf("%s %s\n", s.colors.Cyan("ℹ"), message)
 	} else {
 		fmt.Printf("ℹ %s\n", message)
+	}
+}
+
+// HandleLog handles log messages and adjusts spinner accordingly
+func (s *Spinner) HandleLog(level, message string) {
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+
+	// For WARN and ERROR, clear the spinner line and print the message
+	if level == "WARN" || level == "ERROR" {
+		// Clear the spinner line
+		fmt.Print("\r")
+		fmt.Print("\033[K") // Clear line
+
+		// Print the log message
+		fmt.Println(message)
+
+		// Restart the spinner on a new line
+		if s.colors.IsEnabled() {
+			fmt.Print(s.colors.SpinnerColor(s.frame))
+			fmt.Print(" ")
+			fmt.Print(s.message)
+		}
 	}
 }

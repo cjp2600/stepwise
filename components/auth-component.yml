@@ -1,0 +1,29 @@
+name: "Authentication Component"
+version: "1.0"
+description: "Authentication component with real captures"
+type: "step"
+variables:
+  api_base_url: "https://httpbin.org"
+captures:
+  auth_token: "$.json.username"
+  user_id: "$.json.action"
+
+steps:
+  - name: "Authenticate User"
+    description: "Authenticate user and capture response data"
+    request:
+      method: "POST"
+      url: "{{api_base_url}}/post"
+      headers:
+        Content-Type: "application/json"
+        User-Agent: "Stepwise/1.0"
+      body:
+        username: "testuser"
+        password: "testpass"
+        action: "login"
+    validate:
+      - status: 200
+      - time: "< 3000ms"
+    capture:
+      token: "$.json.username"
+      user_id: "$.json.action" 

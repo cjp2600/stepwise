@@ -7,11 +7,15 @@ import (
 	"github.com/cjp2600/stepwise/internal/colors"
 )
 
+// LogCallback is a function type for handling log messages
+type LogCallback func(level, message string)
+
 // Logger provides logging functionality
 type Logger struct {
 	*log.Logger
-	level  string
-	colors *colors.Colors
+	level    string
+	colors   *colors.Colors
+	callback LogCallback
 }
 
 // New creates a new logger instance
@@ -23,6 +27,11 @@ func New() *Logger {
 	}
 }
 
+// SetCallback sets the log callback function
+func (l *Logger) SetCallback(callback LogCallback) {
+	l.callback = callback
+}
+
 // SetLevel sets the logging level
 func (l *Logger) SetLevel(level string) {
 	l.level = level
@@ -32,7 +41,11 @@ func (l *Logger) SetLevel(level string) {
 func (l *Logger) Info(msg string, args ...interface{}) {
 	if l.level == "info" || l.level == "debug" {
 		prefix := l.colors.Green("[INFO]")
-		l.Printf(prefix+" "+msg, args...)
+		message := prefix + " " + msg
+		l.Printf(message, args...)
+		if l.callback != nil {
+			l.callback("INFO", message)
+		}
 	}
 }
 
@@ -40,18 +53,30 @@ func (l *Logger) Info(msg string, args ...interface{}) {
 func (l *Logger) Debug(msg string, args ...interface{}) {
 	if l.level == "debug" {
 		prefix := l.colors.Blue("[DEBUG]")
-		l.Printf(prefix+" "+msg, args...)
+		message := prefix + " " + msg
+		l.Printf(message, args...)
+		if l.callback != nil {
+			l.callback("DEBUG", message)
+		}
 	}
 }
 
 // Error logs an error message
 func (l *Logger) Error(msg string, args ...interface{}) {
 	prefix := l.colors.Red("[ERROR]")
-	l.Printf(prefix+" "+msg, args...)
+	message := prefix + " " + msg
+	l.Printf(message, args...)
+	if l.callback != nil {
+		l.callback("ERROR", message)
+	}
 }
 
 // Warn logs a warning message
 func (l *Logger) Warn(msg string, args ...interface{}) {
 	prefix := l.colors.Yellow("[WARN]")
-	l.Printf(prefix+" "+msg, args...)
+	message := prefix + " " + msg
+	l.Printf(message, args...)
+	if l.callback != nil {
+		l.callback("WARN", message)
+	}
 }

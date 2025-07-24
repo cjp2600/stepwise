@@ -45,6 +45,12 @@ func (m *Manager) GetAll() map[string]interface{} {
 	return result
 }
 
+// Delete removes a variable by key
+func (m *Manager) Delete(key string) {
+	delete(m.variables, key)
+	m.logger.Debug("Delete variable", "key", key)
+}
+
 // Substitute substitutes variables in a string
 func (m *Manager) Substitute(input string) (string, error) {
 	if input == "" {

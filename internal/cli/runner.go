@@ -23,11 +23,18 @@ type WorkflowRunner struct {
 // NewWorkflowRunner creates a new workflow runner
 func NewWorkflowRunner(cfg *config.Config, log *logger.Logger) *WorkflowRunner {
 	colors := NewColors()
+	spinner := NewSpinner(colors, "Initializing...")
+
+	// Set up log callback for spinner
+	log.SetCallback(func(level, message string) {
+		spinner.HandleLog(level, message)
+	})
+
 	return &WorkflowRunner{
 		config:  cfg,
 		logger:  log,
 		colors:  colors,
-		spinner: NewSpinner(colors, "Initializing..."),
+		spinner: spinner,
 	}
 }
 
@@ -73,6 +80,11 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 				resultsCh <- wfResult{file: file, err: err}
 				continue
 			}
+
+			// Stop spinner before executing workflow to avoid conflicts with logs
+			r.spinner.Stop()
+
+			executor := 
 			executor := workflow.NewExecutor(r.config, r.logger)
 			res, err := executor.Execute(wf)
 
@@ -115,6 +127,11 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 						r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
 						mu.Unlock()
 						continue
+Stop spinner before executing workflow to avoid conflicts with logs
+					r.spinner.Stop()
+
+					executor := workflow.NewExecutor(r.config, r.logger)
+					res, err :=
 					}
 					executor := workflow.NewExecutor(r.config, r.logger)
 					res, err := executor.Execute(wf)
@@ -157,6 +174,8 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 		}
 	}
 
+	// Stop spinner before printing summary to avoid conflicts with logs
+	r.spinner.Stop()
 	r.spinner.Success("Results processed successfully")
 
 	r.printSummary(len(workflowFiles), totalPassed, totalFailed, totalDuration)

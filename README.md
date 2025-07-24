@@ -11,7 +11,9 @@ Stepwise is an open-source API testing framework written in Go, inspired by [Ste
 - **Language-Agnostic Configuration**: Support for YAML, JSON, and JavaScript configuration files
 - **Universal Protocol Support**: REST, GraphQL, gRPC, SOAP, and WebSocket APIs
 - **Multi-Step Workflows**: Chain requests together using captures and variables
-- **Component System**: Reusable templates and components with import functionality
+- **Advanced Component System**: Reusable components with imports, overrides, and cycle detection
+- **Recursive Execution**: Control over directory search with `-r` flag
+- **Beautiful Spinners**: Animated progress indicators with CI-aware behavior
 - **Data-Driven Testing**: Import test data or generate mock data
 - **Comprehensive Validation**: JSON Schema, XML, HTML validation with custom matchers
 - **Performance Testing**: Load testing capabilities with parallel execution
@@ -53,6 +55,15 @@ This creates a `workflow.yml` file with a basic example.
 ```bash
 # Run the example workflow
 stepwise run workflow.yml
+
+# Run all workflows in a directory (non-recursive)
+stepwise run examples/
+
+# Run all workflows in a directory recursively
+stepwise run examples/ -r
+
+# Run with beautiful spinners
+stepwise run workflow.yml --verbose
 ```
 
 ## Configuration
@@ -82,6 +93,46 @@ steps:
       - time: "< 2000ms"
     capture:
       post_id: "$.id"
+```
+
+### Component System Example
+
+```yaml
+# components/http-get-step.yml
+name: "HTTP GET Step"
+version: "1.0"
+type: "step"
+variables:
+  base_url: "https://httpbin.org"
+steps:
+  - name: "HTTP GET Request"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+    validate:
+      - status: 200
+    capture:
+      status: "$.status"
+```
+
+```yaml
+# workflow.yml
+name: "Component Test"
+version: "1.0"
+variables:
+  base_url: "https://httpbin.org"
+
+imports:
+  - path: "./components/http-get-step"
+    alias: "Get Request"
+    variables:
+      base_url: "{{base_url}}"
+
+steps:
+  - name: "Test Request"
+    use: "Get Request"
+    validate:
+      - status: 200
 ```
 
 ### Advanced Workflow Example

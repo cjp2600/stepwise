@@ -20,6 +20,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Import represents an imported component
+type Import struct {
+	Path      string                 `yaml:"path" json:"path"`
+	Version   string                 `yaml:"version,omitempty" json:"version,omitempty"`
+	Alias     string                 `yaml:"alias,omitempty" json:"alias,omitempty"`
+	Variables map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`
+	Overrides map[string]interface{} `yaml:"overrides,omitempty" json:"overrides,omitempty"`
+}
+
 // Workflow represents a complete test workflow
 type Workflow struct {
 	Name        string                 `yaml:"name" json:"name"`
@@ -29,6 +38,7 @@ type Workflow struct {
 	Imports     []Import               `yaml:"imports,omitempty" json:"imports,omitempty"`
 	Steps       []Step                 `yaml:"steps" json:"steps"`
 	Groups      []StepGroup            `yaml:"groups" json:"groups"`
+	Captures    map[string]string      `yaml:"captures,omitempty" json:"captures,omitempty"` // Global captures for the workflow
 }
 
 // StepGroup represents a group of steps that can be executed together
@@ -114,6 +124,12 @@ type GroupResult struct {
 	Parallel bool          `json:"parallel"`
 }
 
+// StepWithVars связывает шаг с переменными компонента
+type StepWithVars struct {
+	Step      Step
+	Variables map[string]interface{}
+}
+
 // Executor executes workflows
 type Executor struct {
 	config     *config.Config
@@ -175,8 +191,8 @@ func LoadWithImports(filename string, searchPaths []string) (*Workflow, error) {
 		workflowDir := filepath.Dir(filename)
 		searchPaths = append([]string{workflowDir}, searchPaths...)
 
-		importManager := NewImportManager(searchPaths)
-		if err := importManager.ResolveImports(&workflow); err != nil {
+		componentManager := NewComponentManager(searchPaths)
+		if err := componentManager.resolveWorkflowImports(&workflow); err != nil {
 			return nil, fmt.Errorf("failed to resolve imports: %w", err)
 		}
 	}
@@ -192,43 +208,126 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	// Initialize variables
 	e.initializeVariables(wf.Variables)
 
-	// Execute individual steps
 	// Собираем карту компонент по имени (только step-компоненты)
-	componentMap := make(map[string]Step)
+	componentMap := make(map[string]StepWithVars)
 	for _, imp := range wf.Imports {
-		importManager := NewImportManager(nil)
-		component, err := importManager.LoadComponent(imp.Path)
-		if err == nil && component.Type == "step" && len(component.Steps) == 1 {
-			componentMap[component.Name] = component.Steps[0]
+		componentManager := NewComponentManager(nil)
+		component, err := componentManager.LoadComponent(imp.Path)
+		if err != nil {
+			continue
+		}
+		if component.Type == "step" && len(component.Steps) == 1 {
+			// Объединяем переменные: сначала из компонента, затем из импорта (импорт имеет приоритет)
+			vars := make(map[string]interface{})
+			for k, v := range component.Variables {
+				vars[k] = v
+			}
+			for k, v := range imp.Variables {
+				vars[k] = v
+			}
+			// Используем alias из импорта, а не name из компонента
+			componentName := imp.Alias
+			if componentName == "" {
+				componentName = component.Name
+			}
+			componentMap[componentName] = StepWithVars{
+				Step:      component.Steps[0],
+				Variables: vars,
+			}
 		}
 	}
 
 	var allResults []TestResult
 
 	for _, step := range wf.Steps {
-		// Если step.Use задан, ищем компонент и подменяем step
 		if step.Use != "" {
-			if compStep, ok := componentMap[step.Use]; ok {
-				// Копируем параметры из компонента в step, кроме Name/Use/Validate/Capture (их можно переопределять)
-				// Вместо step.Request == (Request{}) сравниваем по признаку пустого метода и URL
-				if step.Request.Method == "" && step.Request.URL == "" {
-					step.Request = compStep.Request
+			if comp, ok := componentMap[step.Use]; ok {
+				e.logger.Info("Executing component step", "component", step.Use, "step_name", comp.Step.Name)
+				e.logger.Debug("Component variables", "variables", comp.Variables)
+				e.logger.Debug("Component step request", "url", comp.Step.Request.URL, "method", comp.Step.Request.Method)
+
+				// Сохраняем текущие переменные
+				oldVars := e.varManager.GetAll()
+				e.logger.Debug("Current variables before component", "vars", oldVars)
+
+				// Инициализируем переменные компонента
+				e.initializeVariables(comp.Variables)
+				e.logger.Debug("Variables after component init", "vars", e.varManager.GetAll())
+
+				// Выполнить шаг компонента как обычный шаг
+				compResult := &TestResult{
+					Name:         comp.Step.Name,
+					Status:       "pending",
+					CapturedData: make(map[string]interface{}),
 				}
-				if len(step.Validate) == 0 {
-					step.Validate = compStep.Validate
+				if err := e.executeStepWithRepeat(&comp.Step, compResult); err != nil {
+					compResult.Status = "failed"
+					compResult.Error = err.Error()
+					e.logger.Error("Component step execution failed", "component", comp.Step.Name, "error", err)
+				} else {
+					compResult.Status = "passed"
 				}
-				if len(step.Capture) == 0 {
-					step.Capture = compStep.Capture
+				e.logger.Debug("Component execution result", "captured", compResult.CapturedData)
+
+				// Все capture из compResult.CapturedData добавить в varManager
+				for k, v := range compResult.CapturedData {
+					e.varManager.Set(k, v)
 				}
+				e.logger.Debug("Variables after component capture", "vars", e.varManager.GetAll())
+
+				allResults = append(allResults, *compResult)
+				// Восстанавливаем переменные, но сохраняем захваченные из компонента
+				capturedVars := make(map[string]interface{})
+				for k, v := range compResult.CapturedData {
+					capturedVars[k] = v
+				}
+				// Восстанавливаем старые переменные
+				for k := range e.varManager.GetAll() {
+					if _, ok := oldVars[k]; !ok {
+						e.varManager.Delete(k)
+					}
+				}
+				for k, v := range oldVars {
+					e.varManager.Set(k, v)
+				}
+				// Добавляем захваченные переменные обратно
+				for k, v := range capturedVars {
+					e.varManager.Set(k, v)
+				}
+				e.logger.Debug("Variables after restore with captured", "vars", e.varManager.GetAll())
+
+				// Если у шага есть только use и validate, но нет request, то не выполняем дополнительный шаг
+				if step.Request.URL == "" && step.Request.Method == "" {
+					continue
+				}
+
+				// Теперь выполняем capture/validate для текущего шага, если есть
+				result := &TestResult{
+					Name:         step.Name,
+					Status:       "pending",
+					CapturedData: make(map[string]interface{}),
+				}
+				if err := e.executeStepWithRepeat(&step, result); err != nil {
+					result.Status = "failed"
+					result.Error = err.Error()
+					e.logger.Error("Step execution failed", "step", step.Name, "error", err)
+				} else {
+					result.Status = "passed"
+				}
+				allResults = append(allResults, *result)
+				continue
 			}
+		}
+		// Обычный шаг (только если он не использует компонент или у него есть собственный request)
+		if step.Use != "" && step.Request.URL == "" && step.Request.Method == "" {
+			// Этот шаг уже был обработан как компонент, пропускаем
+			continue
 		}
 		result := &TestResult{
 			Name:         step.Name,
 			Status:       "pending",
 			CapturedData: make(map[string]interface{}),
 		}
-
-		// Check condition if specified
 		if step.Condition != "" {
 			if !e.evaluateCondition(step.Condition) {
 				e.logger.Info("Skipping step due to condition", "step", step.Name, "condition", step.Condition)
@@ -237,7 +336,6 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				continue
 			}
 		}
-
 		if err := e.executeStepWithRepeat(&step, result); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
@@ -245,7 +343,6 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 		} else {
 			result.Status = "passed"
 		}
-
 		allResults = append(allResults, *result)
 	}
 
@@ -839,6 +936,8 @@ func (e *Executor) initializeVariables(vars map[string]interface{}) {
 
 // substituteRequestVariables substitutes variables in the request
 func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
+	e.logger.Debug("Substituting variables in request", "original_url", req.URL)
+
 	substituted := &Request{
 		Protocol:   req.Protocol,
 		Method:     req.Method,
@@ -857,26 +956,32 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 
 	// Substitute URL
 	if substitutedURL, err := e.varManager.Substitute(req.URL); err != nil {
+		e.logger.Error("Failed to substitute URL", "url", req.URL, "error", err)
 		return nil, fmt.Errorf("failed to substitute URL: %w", err)
 	} else {
 		substituted.URL = substitutedURL
+		e.logger.Debug("URL substitution result", "original", req.URL, "substituted", substitutedURL)
 	}
 
 	// Substitute headers
 	for key, value := range req.Headers {
 		if substitutedValue, err := e.varManager.Substitute(value); err != nil {
+			e.logger.Error("Failed to substitute header", "key", key, "value", value, "error", err)
 			return nil, fmt.Errorf("failed to substitute header %s: %w", key, err)
 		} else {
 			substituted.Headers[key] = substitutedValue
+			e.logger.Debug("Header substitution result", "key", key, "original", value, "substituted", substitutedValue)
 		}
 	}
 
 	// Substitute query parameters
 	for key, value := range req.Query {
 		if substitutedValue, err := e.varManager.Substitute(value); err != nil {
+			e.logger.Error("Failed to substitute query", "key", key, "value", value, "error", err)
 			return nil, fmt.Errorf("failed to substitute query %s: %w", key, err)
 		} else {
 			substituted.Query[key] = substitutedValue
+			e.logger.Debug("Query substitution result", "key", key, "original", value, "substituted", substitutedValue)
 		}
 	}
 
@@ -885,15 +990,19 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 		switch body := req.Body.(type) {
 		case string:
 			if substitutedBody, err := e.varManager.Substitute(body); err != nil {
+				e.logger.Error("Failed to substitute body", "body", body, "error", err)
 				return nil, fmt.Errorf("failed to substitute body: %w", err)
 			} else {
 				substituted.Body = substitutedBody
+				e.logger.Debug("Body substitution result", "original", body, "substituted", substitutedBody)
 			}
 		case map[string]interface{}:
 			if substitutedBody, err := e.varManager.SubstituteMap(body); err != nil {
+				e.logger.Error("Failed to substitute body map", "body", body, "error", err)
 				return nil, fmt.Errorf("failed to substitute body: %w", err)
 			} else {
 				substituted.Body = substitutedBody
+				e.logger.Debug("Body map substitution result", "original", body, "substituted", substitutedBody)
 			}
 		default:
 			substituted.Body = req.Body
@@ -902,9 +1011,11 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 
 	// Substitute gRPC fields
 	if substitutedServerAddr, err := e.varManager.Substitute(req.ServerAddr); err != nil {
+		e.logger.Error("Failed to substitute server_addr", "server_addr", req.ServerAddr, "error", err)
 		return nil, fmt.Errorf("failed to substitute server_addr: %w", err)
 	} else {
 		substituted.ServerAddr = substitutedServerAddr
+		e.logger.Debug("ServerAddr substitution result", "original", req.ServerAddr, "substituted", substitutedServerAddr)
 	}
 
 	// Substitute gRPC data
@@ -912,21 +1023,26 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 		switch data := req.Data.(type) {
 		case string:
 			if substitutedData, err := e.varManager.Substitute(data); err != nil {
+				e.logger.Error("Failed to substitute data", "data", data, "error", err)
 				return nil, fmt.Errorf("failed to substitute data: %w", err)
 			} else {
 				substituted.Data = substitutedData
+				e.logger.Debug("Data substitution result", "original", data, "substituted", substitutedData)
 			}
 		case map[string]interface{}:
 			if substitutedData, err := e.varManager.SubstituteMap(data); err != nil {
+				e.logger.Error("Failed to substitute data map", "data", data, "error", err)
 				return nil, fmt.Errorf("failed to substitute data: %w", err)
 			} else {
 				substituted.Data = substitutedData
+				e.logger.Debug("Data map substitution result", "original", data, "substituted", substitutedData)
 			}
 		default:
 			substituted.Data = req.Data
 		}
 	}
 
+	e.logger.Debug("Final substituted request", "url", substituted.URL, "method", substituted.Method)
 	return substituted, nil
 }
 

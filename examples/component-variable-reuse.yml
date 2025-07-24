@@ -1,0 +1,68 @@
+name: "Component Variable Reuse Demo"
+version: "1.0"
+description: "Demonstrates reuse of variables from components"
+variables:
+  base_url: "https://httpbin.org"
+
+imports:
+  - path: "./components/auth-component"
+    alias: "Auth Component"
+    variables:
+      api_base_url: "https://httpbin.org"
+
+steps:
+  - name: "Authentication"
+    description: "Use the auth component to get token"
+    use: "Auth Component"
+    validate:
+      - status: 200
+
+  - name: "Use Captured Token"
+    description: "Use the token captured from the auth component"
+    request:
+      method: "GET"
+      url: "{{base_url}}/headers"
+      headers:
+        Authorization: "Bearer {{token}}"
+        User-Agent: "Stepwise/1.0"
+    validate:
+      - status: 200
+      - time: "< 5000ms"
+    capture:
+      headers: "$.headers"
+      auth_header: "$.headers.Authorization"
+
+  - name: "User Profile"
+    description: "Use user_id captured from auth component"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+      headers:
+        Authorization: "Bearer {{token}}"
+        User-Agent: "Stepwise/1.0"
+      query:
+        user_id: "{{user_id}}"
+    validate:
+      - status: 200
+      - time: "< 5000ms"
+    capture:
+      profile_data: "$.args.user_id"
+
+  - name: "Token Validation"
+    description: "Validate the captured token"
+    request:
+      method: "POST"
+      url: "{{base_url}}/post"
+      headers:
+        Authorization: "Bearer {{token}}"
+        Content-Type: "application/json"
+        User-Agent: "Stepwise/1.0"
+      body:
+        action: "validate"
+        token: "{{token}}"
+        user_id: "{{user_id}}"
+    validate:
+      - status: 200
+      - time: "< 5000ms"
+    capture:
+      validation_result: "$.json" 
