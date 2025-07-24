@@ -517,6 +517,18 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		maxRetries = 1 // Default to 1 attempt
 	}
 
+	// Check if this is a wait-only step (no request)
+	if step.Wait != "" && step.Request.Method == "" && step.Request.URL == "" && step.Request.Service == "" {
+		// This is a wait-only step, just wait and return success
+		duration := e.parseTimeout(step.Wait)
+		if duration > 0 {
+			e.logger.Info("Executing wait step", "step", step.Name, "wait", duration)
+			time.Sleep(duration)
+		}
+		result.Duration = time.Since(startTime)
+		return nil
+	}
+
 	var lastError error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
@@ -693,14 +705,6 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 
 // executeStepWithRepeat executes a step with repeat configuration
 func (e *Executor) executeStepWithRepeat(step *Step, result *TestResult) error {
-	// Добавляем обработку wait перед выполнением шага
-	if step.Wait != "" {
-		duration := e.parseTimeout(step.Wait)
-		if duration > 0 {
-			e.logger.Info("Waiting before step", "step", step.Name, "wait", duration)
-			time.Sleep(duration)
-		}
-	}
 	if step.Repeat == nil {
 		// No repeat configuration, execute normally
 		return e.executeStep(step, result)
