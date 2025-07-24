@@ -84,7 +84,6 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			// Stop spinner before executing workflow to avoid conflicts with logs
 			r.spinner.Stop()
 
-			executor := 
 			executor := workflow.NewExecutor(r.config, r.logger)
 			res, err := executor.Execute(wf)
 
@@ -127,12 +126,11 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 						r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
 						mu.Unlock()
 						continue
-Stop spinner before executing workflow to avoid conflicts with logs
+					}
+
+					// Stop spinner before executing workflow to avoid conflicts with logs
 					r.spinner.Stop()
 
-					executor := workflow.NewExecutor(r.config, r.logger)
-					res, err :=
-					}
 					executor := workflow.NewExecutor(r.config, r.logger)
 					res, err := executor.Execute(wf)
 					resultsCh <- wfResult{file: file, results: res, err: err}
