@@ -8,24 +8,26 @@ import (
 
 // Spinner represents a loading spinner
 type Spinner struct {
-	colors   *Colors
-	frame    int
-	message  string
-	running  bool
-	mu       sync.Mutex
-	stopChan chan bool
-	doneChan chan bool
+	colors      *Colors
+	frame       int
+	message     string
+	running     bool
+	mu          sync.Mutex
+	stopChan    chan bool
+	doneChan    chan bool
+	logHandling bool
 }
 
 // NewSpinner creates a new spinner instance
 func NewSpinner(colors *Colors, message string) *Spinner {
 	return &Spinner{
-		colors:   colors,
-		message:  message,
-		frame:    0,
-		running:  false,
-		stopChan: make(chan bool),
-		doneChan: make(chan bool),
+		colors:      colors,
+		message:     message,
+		frame:       0,
+		running:     false,
+		stopChan:    make(chan bool),
+		doneChan:    make(chan bool),
+		logHandling: true,
 	}
 }
 
@@ -97,6 +99,19 @@ func (s *Spinner) Stop() {
 	fmt.Println()       // Move to next line
 }
 
+// Disable disables the spinner completely
+func (s *Spinner) Disable() {
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
+}
+
+// Restart restarts the spinner with log handling enabled
+func (s *Spinner) Restart() {
+	s.EnableLogHandling()
+	s.Start()
+}
+
 // UpdateMessage updates the spinner message
 func (s *Spinner) UpdateMessage(message string) {
 	s.mu.Lock()
@@ -134,29 +149,76 @@ func (s *Spinner) Info(message string) {
 	}
 }
 
+// DisableLogHandling disables the spinner's log handling
+func (s *Spinner) DisableLogHandling() {
+	s.mu.Lock()
+	s.logHandling = false
+	s.mu.Unlock()
+}
+
+// EnableLogHandling enables the spinner's log handling
+func (s *Spinner) EnableLogHandling() {
+	s.mu.Lock()
+	s.logHandling = true
+	s.mu.Unlock()
+}
+
 // HandleLog handles log messages and adjusts spinner accordingly
 func (s *Spinner) HandleLog(level, message string) {
 	s.mu.Lock()
-	if !s.running {
+	if !s.running || !s.logHandling {
 		s.mu.Unlock()
 		return
 	}
 	s.mu.Unlock()
 
-	// For WARN and ERROR, clear the spinner line and print the message
-	if level == "WARN" || level == "ERROR" {
-		// Clear the spinner line
-		fmt.Print("\r")
-		fmt.Print("\033[K") // Clear line
+	// Temporarily stop the spinner
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
 
-		// Print the log message
-		fmt.Println(message)
+	// Wait for the spinner goroutine to stop
+	s.stopChan <- true
+	<-s.doneChan
 
-		// Restart the spinner on a new line
-		if s.colors.IsEnabled() {
-			fmt.Print(s.colors.SpinnerColor(s.frame))
-			fmt.Print(" ")
-			fmt.Print(s.message)
+	// Clear the current line completely
+	fmt.Print("\r")
+	fmt.Print("\033[K") // Clear line
+	fmt.Println()       // Move to next line
+
+	// Print the log message
+	fmt.Println(message)
+
+	// Restart the spinner
+	s.mu.Lock()
+	s.running = true
+	s.mu.Unlock()
+
+	// Start the spinner again
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-s.stopChan:
+				s.doneChan <- true
+				return
+			case <-ticker.C:
+				s.mu.Lock()
+				if !s.running {
+					s.mu.Unlock()
+					return
+				}
+				s.frame++
+				s.mu.Unlock()
+
+				// Clear the line and print the spinner
+				fmt.Print("\r")
+				fmt.Print(s.colors.SpinnerColor(s.frame))
+				fmt.Print(" ")
+				fmt.Print(s.message)
+			}
 		}
-	}
+	}()
 }

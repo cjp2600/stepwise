@@ -30,6 +30,8 @@ func NewApp(cfg *config.Config, log *logger.Logger) *App {
 
 // Run executes the CLI application
 func (a *App) Run(args []string) error {
+	a.logger.SetMuteMode(true)
+
 	if len(args) < 2 {
 		return a.showHelp()
 	}
@@ -118,6 +120,7 @@ func (a *App) handleRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	parallelism := fs.IntP("parallel", "p", 1, "Number of parallel workflow executions")
 	recursive := fs.BoolP("recursive", "r", false, "Search recursively in subdirectories")
+	verbose := fs.BoolP("verbose", "v", false, "Enable verbose logging")
 	_ = fs.Parse(args)
 
 	// Find the first non-flag argument as the path
@@ -132,6 +135,14 @@ func (a *App) handleRun(args []string) error {
 		return fmt.Errorf("workflow file path or directory is required")
 	}
 
+	// Set verbose mode
+	if *verbose {
+		a.logger.SetMuteMode(false)
+		a.logger.SetLevel("debug")
+	} else {
+		a.logger.SetMuteMode(true)
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("failed to access path: %w", err)
@@ -142,24 +153,36 @@ func (a *App) handleRun(args []string) error {
 		return runner.RunWorkflows(path, *parallelism, *recursive)
 	} else {
 		spinner := NewSpinner(a.colors, "Loading workflow...")
-		spinner.Start()
+
+		// Only use spinner in non-verbose mode
+		if !*verbose {
+			spinner.Start()
+		}
 
 		a.logger.Info("Running workflow", "file", path)
 		wf, err := workflow.Load(path)
 		if err != nil {
-			spinner.Error("Failed to load workflow")
+			if !*verbose {
+				spinner.Error("Failed to load workflow")
+			}
 			return fmt.Errorf("failed to load workflow: %w", err)
 		}
 
-		spinner.UpdateMessage("Executing workflow...")
+		if !*verbose {
+			spinner.UpdateMessage("Executing workflow...")
+		}
 		executor := workflow.NewExecutor(a.config, a.logger)
 		results, err := executor.Execute(wf)
 		if err != nil {
-			spinner.Error("Workflow execution failed")
+			if !*verbose {
+				spinner.Error("Workflow execution failed")
+			}
 			return fmt.Errorf("workflow execution failed: %w", err)
 		}
 
-		spinner.Success("Workflow completed successfully")
+		if !*verbose {
+			spinner.Success("Workflow completed successfully")
+		}
 		hasFailures := a.printResults(results)
 		if hasFailures {
 			return fmt.Errorf("workflow execution completed with failures")
@@ -213,59 +236,47 @@ func (a *App) handleGenerate(args []string) error {
 
 // showHelp shows the help message
 func (a *App) showHelp() error {
-	help := fmt.Sprintf(`%s - API Testing Framework
+	fmt.Printf("%s\n", a.colors.Bold("Stepwise - API Testing Framework"))
+	fmt.Printf("%s\n\n", a.colors.Dim("A powerful tool for testing APIs with YAML-based workflows"))
 
-Usage:
-  stepwise <command> [options]
+	fmt.Printf("%s\n", a.colors.Bold("USAGE:"))
+	fmt.Printf("  stepwise <command> [options] [arguments]\n\n")
 
-Commands:
-  init                    Initialize a new Stepwise project
-  run <path>             Run workflow file or directory
-  validate <workflow>    Validate a workflow file
-  info <workflow>        Show workflow information
-  generate               Generate test data
-  help                   Show this help message
-  version                Show version information
+	fmt.Printf("%s\n", a.colors.Bold("COMMANDS:"))
+	fmt.Printf("  %s    %s\n", a.colors.Green("run"), "Execute workflow files")
+	fmt.Printf("  %s    %s\n", a.colors.Green("validate"), "Validate workflow files")
+	fmt.Printf("  %s    %s\n", a.colors.Green("info"), "Show workflow information")
+	fmt.Printf("  %s    %s\n", a.colors.Green("init"), "Initialize a new project")
+	fmt.Printf("  %s    %s\n", a.colors.Green("generate"), "Generate test data")
+	fmt.Printf("  %s    %s\n", a.colors.Green("help"), "Show this help message")
+	fmt.Printf("  %s    %s\n", a.colors.Green("version"), "Show version information")
 
-Options:
-  --env <environment>    Set environment (default: development)
-  --var <key=value>      Set custom variables
-  --parallel <n>         Number of parallel executions
-  --timeout <duration>   Request timeout
-  --output <format>      Output format (console, json, html)
-  %s              Enable verbose logging
-  --quiet                Enable quiet mode
-  --watch                Watch mode for file changes
-  -r, --recursive        Search recursively in subdirectories
+	fmt.Printf("\n%s\n", a.colors.Bold("EXAMPLES:"))
+	fmt.Printf("  %s\n", "stepwise run workflow.yml")
+	fmt.Printf("  %s\n", "stepwise run --verbose workflow.yml")
+	fmt.Printf("  %s\n", "stepwise run --parallel 4 --recursive ./tests")
+	fmt.Printf("  %s\n", "stepwise validate workflow.yml")
+	fmt.Printf("  %s\n", "stepwise info workflow.yml")
 
-Examples:
-  stepwise init
-  stepwise run workflow.yml                    # Run single file
-  stepwise run ./examples                     # Run all workflows in directory (non-recursive)
-  stepwise run ./examples -r                  # Run all workflows recursively
-  stepwise run .                             # Run all workflows in current directory
-  stepwise run . -r                          # Run all workflows recursively
-  stepwise run workflow.yml --env production
-  stepwise validate workflow.yml
-  stepwise info workflow.yml
+	fmt.Printf("\n%s\n", a.colors.Bold("GLOBAL OPTIONS:"))
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--help, -h"), "Show help message")
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--version, -v"), "Show version information")
 
-Directory Execution:
-  When running a directory, Stepwise will:
-  - By default: Find all .yml and .yaml files in the specified directory only
-  - With -r flag: Find all .yml and .yaml files recursively in subdirectories
-  - Skip common directories (.git, node_modules, etc.) when recursive
-  - Execute each workflow file
-  - Provide individual and overall summaries
+	fmt.Printf("\n%s\n", a.colors.Bold("RUN COMMAND OPTIONS:"))
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--parallel, -p"), "Number of parallel workflow executions (default: 1)")
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--recursive, -r"), "Search recursively in subdirectories")
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--verbose, -v"), "Enable verbose logging (shows detailed logs in real-time)")
 
-Environment Variables:
-  NO_COLOR               Disable colored output
-  CI                     Disable colored output (auto-detected)
+	fmt.Printf("\n%s\n", a.colors.Bold("WORKFLOW FILES:"))
+	fmt.Printf("  Stepwise supports YAML workflow files with the following features:\n")
+	fmt.Printf("  • HTTP and gRPC requests\n")
+	fmt.Printf("  • Variable substitution\n")
+	fmt.Printf("  • Request validation\n")
+	fmt.Printf("  • Response capture\n")
+	fmt.Printf("  • Retry logic\n")
+	fmt.Printf("  • Parallel execution\n")
+	fmt.Printf("  • Component imports\n")
 
-For more information, visit: https://github.com/stepwise/stepwise
-`,
-		a.colors.Bold("Stepwise"),
-		a.colors.Cyan("--verbose"))
-	fmt.Print(help)
 	return nil
 }
 

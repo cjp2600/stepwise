@@ -18,6 +18,7 @@ type WorkflowRunner struct {
 	logger  *logger.Logger
 	colors  *Colors
 	spinner *Spinner
+	verbose bool
 }
 
 // NewWorkflowRunner creates a new workflow runner
@@ -25,38 +26,52 @@ func NewWorkflowRunner(cfg *config.Config, log *logger.Logger) *WorkflowRunner {
 	colors := NewColors()
 	spinner := NewSpinner(colors, "Initializing...")
 
-	// Set up log callback for spinner
-	log.SetCallback(func(level, message string) {
-		spinner.HandleLog(level, message)
-	})
+	// Check if verbose mode is enabled
+	verbose := !log.IsMuted()
 
 	return &WorkflowRunner{
 		config:  cfg,
 		logger:  log,
 		colors:  colors,
 		spinner: spinner,
+		verbose: verbose,
 	}
 }
 
 // RunWorkflows runs all workflow files in the given path
 func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bool) error {
-	r.spinner.UpdateMessage("Searching for workflow files...")
-	r.spinner.Start()
+	if r.verbose {
+		r.logger.Info("Searching for workflow files...", "path", path)
+	} else {
+		r.spinner.UpdateMessage("Searching for workflow files...")
+		r.spinner.EnableLogHandling()
+		r.spinner.Start()
+	}
 
 	workflowFiles, err := r.findWorkflowFiles(path, recursive)
 	if err != nil {
-		r.spinner.Error("Failed to find workflow files")
+		if r.verbose {
+			r.logger.Error("Failed to find workflow files", "error", err)
+		} else {
+			r.spinner.Error("Failed to find workflow files")
+		}
 		return fmt.Errorf("failed to find workflow files: %w", err)
 	}
 
 	if len(workflowFiles) == 0 {
-		r.spinner.Info("No workflow files found")
-		r.logger.Info("No workflow files found", "path", path)
+		if r.verbose {
+			r.logger.Info("No workflow files found", "path", path)
+		} else {
+			r.spinner.Info("No workflow files found")
+		}
 		return nil
 	}
 
-	r.spinner.Success(fmt.Sprintf("Found %d workflow files", len(workflowFiles)))
-	r.logger.Info("Found workflow files", "count", len(workflowFiles), "path", path)
+	if r.verbose {
+		r.logger.Info("Found workflow files", "count", len(workflowFiles), "path", path)
+	} else {
+		r.spinner.Success(fmt.Sprintf("Found %d workflow files", len(workflowFiles)))
+	}
 
 	type wfResult struct {
 		file    string
@@ -69,36 +84,80 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 	if parallelism <= 1 {
 		// Sequential (old behavior)
 		for i, file := range workflowFiles {
-			r.spinner.UpdateMessage(fmt.Sprintf("Running workflow %d/%d: %s", i+1, len(workflowFiles), filepath.Base(file)))
-			r.spinner.Start()
+			if r.verbose {
+				r.logger.Info("Running workflow", "file", file, "progress", fmt.Sprintf("%d/%d", i+1, len(workflowFiles)))
+			} else {
+				r.spinner.UpdateMessage(fmt.Sprintf("Running workflow %d/%d: %s", i+1, len(workflowFiles), filepath.Base(file)))
+				r.spinner.Restart()
+			}
 
-			r.logger.Info("Running workflow", "file", file)
 			wf, err := workflow.Load(file)
 			if err != nil {
-				r.spinner.Error(fmt.Sprintf("Failed to load workflow: %s", filepath.Base(file)))
-				r.logger.Error("Failed to load workflow", "file", file, "error", err)
+				if r.verbose {
+					r.logger.Error("Failed to load workflow", "file", file, "error", err)
+				} else {
+					r.spinner.Error(fmt.Sprintf("Failed to load workflow: %s", filepath.Base(file)))
+				}
 				resultsCh <- wfResult{file: file, err: err}
 				continue
 			}
 
-			// Stop spinner before executing workflow to avoid conflicts with logs
-			r.spinner.Stop()
+			// In verbose mode, we don't use spinner at all
+			if !r.verbose {
+				// Stop spinner before executing workflow - logs will be collected but not printed
+				r.spinner.Stop()
+
+				// Completely disable all logging during workflow execution
+				r.logger.SetMuteMode(true)
+			}
 
 			executor := workflow.NewExecutor(r.config, r.logger)
 			res, err := executor.Execute(wf)
 
+			if !r.verbose {
+				// Re-enable logging after workflow execution
+				r.logger.SetMuteMode(false)
+			}
+
 			if err != nil {
-				r.spinner.Error(fmt.Sprintf("Workflow failed: %s", filepath.Base(file)))
+				if r.verbose {
+					r.logger.Error("Workflow failed", "file", file, "error", err)
+				} else {
+					r.spinner.Error(fmt.Sprintf("Workflow failed: %s", filepath.Base(file)))
+				}
 			} else {
-				r.spinner.Success(fmt.Sprintf("Workflow completed: %s", filepath.Base(file)))
+				if r.verbose {
+					r.logger.Info("Workflow completed", "file", file)
+				} else {
+					r.spinner.Success(fmt.Sprintf("Workflow completed: %s", filepath.Base(file)))
+				}
+			}
+
+			// Print collected logs in the report (only in non-verbose mode)
+			if !r.verbose {
+				logs := r.logger.GetLogBuffer()
+				if len(logs) > 0 {
+					fmt.Printf("\n%s %s %s\n",
+						r.colors.Cyan("==="),
+						r.colors.Bold("WORKFLOW LOGS"),
+						r.colors.Cyan("==="))
+					for _, log := range logs {
+						fmt.Println(log)
+					}
+					fmt.Println()
+				}
 			}
 
 			resultsCh <- wfResult{file: file, results: res, err: err}
 		}
 	} else {
 		// Parallel worker pool
-		r.spinner.UpdateMessage(fmt.Sprintf("Running %d workflows in parallel (%d workers)", len(workflowFiles), parallelism))
-		r.spinner.Start()
+		if r.verbose {
+			r.logger.Info("Running workflows in parallel", "count", len(workflowFiles), "workers", parallelism)
+		} else {
+			r.spinner.UpdateMessage(fmt.Sprintf("Running %d workflows in parallel (%d workers)", len(workflowFiles), parallelism))
+			r.spinner.Restart()
+		}
 
 		fileCh := make(chan string, len(workflowFiles))
 		for _, file := range workflowFiles {
@@ -115,41 +174,79 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			go func() {
 				defer wg.Done()
 				for file := range fileCh {
-					r.logger.Info("Running workflow", "file", file)
+					if r.verbose {
+						r.logger.Info("Running workflow", "file", file)
+					}
 					wf, err := workflow.Load(file)
 					if err != nil {
-						r.logger.Error("Failed to load workflow", "file", file, "error", err)
+						if r.verbose {
+							r.logger.Error("Failed to load workflow", "file", file, "error", err)
+						}
 						resultsCh <- wfResult{file: file, err: err}
 
 						mu.Lock()
 						completed++
-						r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
+						if r.verbose {
+							r.logger.Info("Workflow completed", "progress", fmt.Sprintf("%d/%d", completed, len(workflowFiles)))
+						} else {
+							r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
+						}
 						mu.Unlock()
 						continue
 					}
 
-					// Stop spinner before executing workflow to avoid conflicts with logs
-					r.spinner.Stop()
+					// In verbose mode, we don't use spinner at all
+					if !r.verbose {
+						// Stop spinner before executing workflow - logs will be collected but not printed
+						r.spinner.Stop()
+
+						// Completely disable all logging during workflow execution
+						r.logger.SetMuteMode(true)
+					}
 
 					executor := workflow.NewExecutor(r.config, r.logger)
 					res, err := executor.Execute(wf)
 					resultsCh <- wfResult{file: file, results: res, err: err}
 
+					if !r.verbose {
+						// Re-enable logging after workflow execution
+						r.logger.SetMuteMode(false)
+
+						// Print collected logs in the report
+						logs := r.logger.GetLogBuffer()
+						if len(logs) > 0 {
+							fmt.Printf("\n%s %s %s\n",
+								r.colors.Cyan("==="),
+								r.colors.Bold(fmt.Sprintf("WORKFLOW LOGS (%s)", filepath.Base(file))),
+								r.colors.Cyan("==="))
+							for _, log := range logs {
+								fmt.Println(log)
+							}
+							fmt.Println()
+						}
+					}
+
 					mu.Lock()
 					completed++
-					r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
+					if r.verbose {
+						r.logger.Info("Workflow completed", "progress", fmt.Sprintf("%d/%d", completed, len(workflowFiles)))
+					} else {
+						r.spinner.UpdateMessage(fmt.Sprintf("Running workflows: %d/%d completed", completed, len(workflowFiles)))
+					}
 					mu.Unlock()
 				}
 			}()
 		}
 		wg.Wait()
-		r.spinner.Success(fmt.Sprintf("All %d workflows completed", len(workflowFiles)))
+		if r.verbose {
+			r.logger.Info("All workflows completed", "count", len(workflowFiles))
+		} else {
+			r.spinner.Success(fmt.Sprintf("All %d workflows completed", len(workflowFiles)))
+		}
 	}
 	close(resultsCh)
 
-	r.spinner.UpdateMessage("Processing results...")
-	r.spinner.Start()
-
+	// Process results without spinner
 	totalResults := make([]workflow.TestResult, 0)
 	totalPassed := 0
 	totalFailed := 0
@@ -172,9 +269,14 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 		}
 	}
 
-	// Stop spinner before printing summary to avoid conflicts with logs
-	r.spinner.Stop()
-	r.spinner.Success("Results processed successfully")
+	// In verbose mode, we don't use spinner at all
+	if !r.verbose {
+		// Stop spinner before printing summary - let logs print normally
+		r.spinner.Stop()
+		r.spinner.Success("Results processed successfully")
+	} else {
+		r.logger.Info("Results processed successfully")
+	}
 
 	r.printSummary(len(workflowFiles), totalPassed, totalFailed, totalDuration)
 
