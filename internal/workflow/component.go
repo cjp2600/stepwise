@@ -471,19 +471,8 @@ func (cm *ComponentManager) resolveWorkflowImport(wf *Workflow, imp *Import) err
 
 // mergeStepIntoWorkflow merges a step component into a workflow
 func (cm *ComponentManager) mergeStepIntoWorkflow(wf *Workflow, component *Component, imp *Import) error {
-	if len(component.Steps) != 1 {
-		return fmt.Errorf("step component must contain exactly one step")
-	}
-
-	step := component.Steps[0]
-
-	// Apply alias if specified
-	if imp.Alias != "" {
-		step.Name = imp.Alias
-	}
-
-	// Add step to workflow
-	wf.Steps = append(wf.Steps, step)
+	// Не добавляем шаги из компонента в wf.Steps!
+	// Просто регистрируем переменные и captures, если нужно
 
 	// Merge variables
 	if component.Variables != nil {

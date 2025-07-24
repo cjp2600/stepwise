@@ -210,14 +210,25 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 
 	// Собираем карту компонент по имени (только step-компоненты)
 	componentMap := make(map[string]StepWithVars)
+	// Получаем директорию workflow-файла для корректного поиска компонентов
+	workflowDir := ""
+	if wf != nil && len(wf.Imports) > 0 {
+		if len(os.Args) > 2 {
+			workflowPath := os.Args[2]
+			workflowDir = filepath.Dir(workflowPath)
+		}
+	}
+	searchPaths := []string{}
+	if workflowDir != "" {
+		searchPaths = append(searchPaths, workflowDir)
+	}
+	componentManager := NewComponentManager(searchPaths)
 	for _, imp := range wf.Imports {
-		componentManager := NewComponentManager(nil)
 		component, err := componentManager.LoadComponent(imp.Path)
 		if err != nil {
 			continue
 		}
 		if component.Type == "step" && len(component.Steps) == 1 {
-			// Объединяем переменные: сначала из компонента, затем из импорта (импорт имеет приоритет)
 			vars := make(map[string]interface{})
 			for k, v := range component.Variables {
 				vars[k] = v
@@ -225,7 +236,6 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 			for k, v := range imp.Variables {
 				vars[k] = v
 			}
-			// Используем alias из импорта, а не name из компонента
 			componentName := imp.Alias
 			if componentName == "" {
 				componentName = component.Name
@@ -237,91 +247,59 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 		}
 	}
 
+	// DEBUG: выводим все ключи componentMap перед выполнением шагов
+	componentKeys := make([]string, 0, len(componentMap))
+	for k := range componentMap {
+		componentKeys = append(componentKeys, k)
+	}
+	e.logger.Info("[DEBUG] Available componentMap keys", "keys", componentKeys)
+
 	var allResults []TestResult
 
 	for _, step := range wf.Steps {
 		if step.Use != "" {
 			if comp, ok := componentMap[step.Use]; ok {
-				e.logger.Info("Executing component step", "component", step.Use, "step_name", comp.Step.Name)
-				e.logger.Debug("Component variables", "variables", comp.Variables)
-				e.logger.Debug("Component step request", "url", comp.Step.Request.URL, "method", comp.Step.Request.Method)
-
-				// Сохраняем текущие переменные
-				oldVars := e.varManager.GetAll()
-				e.logger.Debug("Current variables before component", "vars", oldVars)
-
-				// Инициализируем переменные компонента
+				mergedStep := comp.Step
+				if step.Capture != nil {
+					mergedStep.Capture = step.Capture
+				}
+				if len(step.Validate) > 0 {
+					mergedStep.Validate = step.Validate
+				}
+				if step.Name != "" {
+					mergedStep.Name = step.Name
+				}
+				if step.Description != "" {
+					mergedStep.Description = step.Description
+				}
+				e.logger.Info("[COMPONENT] Executing use step", "use", step.Use, "step", mergedStep.Name)
 				e.initializeVariables(comp.Variables)
-				e.logger.Debug("Variables after component init", "vars", e.varManager.GetAll())
-
-				// Выполнить шаг компонента как обычный шаг
-				compResult := &TestResult{
-					Name:         comp.Step.Name,
-					Status:       "pending",
-					CapturedData: make(map[string]interface{}),
-				}
-				if err := e.executeStepWithRepeat(&comp.Step, compResult); err != nil {
-					compResult.Status = "failed"
-					compResult.Error = err.Error()
-					e.logger.Error("Component step execution failed", "component", comp.Step.Name, "error", err)
-				} else {
-					compResult.Status = "passed"
-				}
-				e.logger.Debug("Component execution result", "captured", compResult.CapturedData)
-
-				// Все capture из compResult.CapturedData добавить в varManager
-				for k, v := range compResult.CapturedData {
-					e.varManager.Set(k, v)
-				}
-				e.logger.Debug("Variables after component capture", "vars", e.varManager.GetAll())
-
-				allResults = append(allResults, *compResult)
-				// Восстанавливаем переменные, но сохраняем захваченные из компонента
-				capturedVars := make(map[string]interface{})
-				for k, v := range compResult.CapturedData {
-					capturedVars[k] = v
-				}
-				// Восстанавливаем старые переменные
-				for k := range e.varManager.GetAll() {
-					if _, ok := oldVars[k]; !ok {
-						e.varManager.Delete(k)
-					}
-				}
-				for k, v := range oldVars {
-					e.varManager.Set(k, v)
-				}
-				// Добавляем захваченные переменные обратно
-				for k, v := range capturedVars {
-					e.varManager.Set(k, v)
-				}
-				e.logger.Debug("Variables after restore with captured", "vars", e.varManager.GetAll())
-
-				// Если у шага есть только use и validate, но нет request, то не выполняем дополнительный шаг
-				if step.Request.URL == "" && step.Request.Method == "" {
-					continue
-				}
-
-				// Теперь выполняем capture/validate для текущего шага, если есть
 				result := &TestResult{
-					Name:         step.Name,
+					Name:         mergedStep.Name,
 					Status:       "pending",
 					CapturedData: make(map[string]interface{}),
 				}
-				if err := e.executeStepWithRepeat(&step, result); err != nil {
+				if err := e.executeStepWithRepeat(&mergedStep, result); err != nil {
 					result.Status = "failed"
 					result.Error = err.Error()
-					e.logger.Error("Step execution failed", "step", step.Name, "error", err)
+					e.logger.Error("Component step execution failed", "component", mergedStep.Name, "error", err)
 				} else {
 					result.Status = "passed"
 				}
 				allResults = append(allResults, *result)
+				vars := e.varManager.GetAll()
+				e.logger.Info("[DEBUG] Variables after component step", "step", mergedStep.Name, "vars", vars)
+				continue
+			} else {
+				e.logger.Error("Component not found for use step", "use", step.Use)
+				result := &TestResult{
+					Name:   step.Name,
+					Status: "failed",
+					Error:  fmt.Sprintf("Component not found for use: %s", step.Use),
+				}
+				allResults = append(allResults, *result)
 				continue
 			}
-		}
-		// Обычный шаг (только если он не использует компонент или у него есть собственный request)
-		if step.Use != "" && step.Request.URL == "" && step.Request.Method == "" {
-			// Этот шаг уже был обработан как компонент, пропускаем
-			continue
 		}
 		result := &TestResult{
 			Name:         step.Name,
@@ -344,6 +322,8 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 			result.Status = "passed"
 		}
 		allResults = append(allResults, *result)
+		vars := e.varManager.GetAll()
+		e.logger.Info("[DEBUG] Variables after step", "step", step.Name, "vars", vars)
 	}
 
 	// Execute step groups
