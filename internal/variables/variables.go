@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cjp2600/stepwise/internal/logger"
+	"github.com/cjp2600/stepwise/internal/utils"
 )
 
 // Manager handles variable substitution and management
@@ -57,21 +58,25 @@ func (m *Manager) Substitute(input string) (string, error) {
 		return input, nil
 	}
 
-	// Handle different substitution patterns
-	// {{variable}} - simple variable substitution
-	// {{faker.function}} - faker function calls
-	// {{env.VARIABLE}} - environment variable
+	previous := ""
+	current := input
+	for i := 0; i < 10; i++ { // ограничение на глубину рекурсии
+		previous = current
 
-	// First, handle faker functions
-	input = m.substituteFakerFunctions(input)
+		// Handle utils functions
+		current = m.substituteUtilsFunctions(current)
+		// Faker
+		current = m.substituteFakerFunctions(current)
+		// Variables
+		current = m.substituteVariables(current)
+		// Env
+		current = m.substituteEnvironmentVariables(current)
 
-	// Then handle simple variables
-	input = m.substituteVariables(input)
-
-	// Finally handle environment variables
-	input = m.substituteEnvironmentVariables(input)
-
-	return input, nil
+		if current == previous || !strings.Contains(current, "{{") {
+			break
+		}
+	}
+	return current, nil
 }
 
 // substituteVariables substitutes {{variable}} patterns
@@ -141,6 +146,42 @@ func (m *Manager) substituteEnvironmentVariables(input string) string {
 		// Return original if not found
 		m.logger.Warn("Environment variable not found", "variable", envVar)
 		return match
+	})
+}
+
+// substituteUtilsFunctions substitutes {{utils.function}} patterns
+func (m *Manager) substituteUtilsFunctions(input string) string {
+	re := regexp.MustCompile(`\{\{utils\.([a-zA-Z0-9_]+)\((.*?)\)\}\}`)
+	return re.ReplaceAllStringFunc(input, func(match string) string {
+		// Extract function name and argument string
+		parts := re.FindStringSubmatch(match)
+		if len(parts) < 3 {
+			return match
+		}
+		funcName := parts[1]
+		argStr := strings.TrimSpace(parts[2])
+
+		// Поддержка вложенных шаблонов: если аргумент содержит {{...}}, подставить переменные
+		if strings.Contains(argStr, "{{") {
+			argStr, _ = m.Substitute(argStr)
+		}
+		argStr = strings.Trim(argStr, "\"'") // убрать кавычки
+
+		switch funcName {
+		case "base64":
+			return utils.Base64Encode(argStr)
+		case "base64_decode":
+			decoded, err := utils.Base64Decode(argStr)
+			if err != nil {
+				m.logger.Warn("base64_decode error", "arg", argStr, "err", err)
+				return ""
+			}
+			return decoded
+		// Здесь можно добавить другие утилиты
+		default:
+			m.logger.Warn("Unknown utils function", "function", funcName)
+			return match
+		}
 	})
 }
 
@@ -268,32 +309,41 @@ func (m *Manager) generateSHA() string {
 // SubstituteMap substitutes variables in a map
 func (m *Manager) SubstituteMap(input map[string]interface{}) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
-
 	for key, value := range input {
-		switch v := value.(type) {
-		case string:
-			substituted, err := m.Substitute(v)
-			if err != nil {
-				return nil, err
-			}
-			result[key] = substituted
-		case map[string]interface{}:
-			substituted, err := m.SubstituteMap(v)
-			if err != nil {
-				return nil, err
-			}
-			result[key] = substituted
-		case []interface{}:
-			substituted, err := m.SubstituteSlice(v)
-			if err != nil {
-				return nil, err
-			}
-			result[key] = substituted
-		default:
-			result[key] = value
-		}
+		result[key] = value
 	}
 
+	for i := 0; i < 10; i++ {
+		changed := false
+		for key, value := range result {
+			switch v := value.(type) {
+			case string:
+				substituted, err := m.Substitute(v)
+				if err != nil {
+					return nil, err
+				}
+				if substituted != v {
+					changed = true
+				}
+				result[key] = substituted
+			case map[string]interface{}:
+				substituted, err := m.SubstituteMap(v)
+				if err != nil {
+					return nil, err
+				}
+				result[key] = substituted
+			case []interface{}:
+				substituted, err := m.SubstituteSlice(v)
+				if err != nil {
+					return nil, err
+				}
+				result[key] = substituted
+			}
+		}
+		if !changed {
+			break
+		}
+	}
 	return result, nil
 }
 

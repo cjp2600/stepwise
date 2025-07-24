@@ -211,3 +211,32 @@ func TestGenerateFakerData(t *testing.T) {
 		t.Error("Generated date should not be empty")
 	}
 }
+
+func TestUtilsBase64(t *testing.T) {
+	log := logger.New()
+	vm := NewManager(log)
+
+	// Прямая строка
+	encoded, _ := vm.Substitute("{{utils.base64('hello')}}")
+	if encoded != "aGVsbG8=" {
+		t.Errorf("Expected aGVsbG8=, got %s", encoded)
+	}
+
+	// Декодирование
+	decoded, _ := vm.Substitute("{{utils.base64_decode('aGVsbG8=')}}")
+	if decoded != "hello" {
+		t.Errorf("Expected hello, got %s", decoded)
+	}
+
+	// Вложенная переменная
+	vm.Set("myvar", "test123")
+	encodedVar, _ := vm.Substitute("{{utils.base64({{myvar}})}}")
+	if encodedVar != "dGVzdDEyMw==" {
+		t.Errorf("Expected dGVzdDEyMw==, got %s", encodedVar)
+	}
+
+	decodedVar, _ := vm.Substitute("{{utils.base64_decode('dGVzdDEyMw==')}}")
+	if decodedVar != "test123" {
+		t.Errorf("Expected test123, got %s", decodedVar)
+	}
+}

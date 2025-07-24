@@ -65,7 +65,8 @@ type Step struct {
 	RetryDelay   string                      `yaml:"retry_delay" json:"retry_delay"`
 	Timeout      string                      `yaml:"timeout" json:"timeout"`
 	Repeat       *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
-	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"` // Новое поле для задержки
+	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"`   // Новое поле для задержки
+	Print        string                      `yaml:"print,omitempty" json:"print,omitempty"` // Новое поле для вывода
 }
 
 // RepeatConfig represents configuration for repeating a step
@@ -112,6 +113,7 @@ type TestResult struct {
 	Retries       int                           `json:"retries,omitempty"`
 	RepeatResults []TestResult                  `json:"repeat_results,omitempty"`
 	RepeatCount   int                           `json:"repeat_count,omitempty"`
+	PrintText     string                        `json:"print_text,omitempty"` // Текст print для отчёта
 }
 
 // GroupResult represents the result of a step group
@@ -515,6 +517,19 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 	maxRetries := step.Retry
 	if maxRetries == 0 {
 		maxRetries = 1 // Default to 1 attempt
+	}
+
+	// Всегда сохраняем print-текст, если он есть
+	if step.Print != "" {
+		msg, _ := e.varManager.Substitute(step.Print)
+		result.PrintText = msg
+	}
+
+	// Print-only step (нет запроса, wait, use)
+	if step.Print != "" && step.Request.Method == "" && step.Request.URL == "" && step.Request.Service == "" && step.Wait == "" && step.Use == "" {
+		result.Status = "passed"
+		result.Duration = time.Since(startTime)
+		return nil
 	}
 
 	// Check if this is a wait-only step (no request)

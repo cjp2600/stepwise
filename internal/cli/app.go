@@ -306,12 +306,18 @@ func (a *App) printResults(results []workflow.TestResult) bool {
 				a.colors.Green("✓"),
 				a.colors.Cyan(a.colors.Bold(result.Name)),
 				duration)
+			if result.PrintText != "" {
+				fmt.Printf("  %s\n", a.colors.Dim(result.PrintText))
+			}
 		} else {
 			fmt.Printf("%s %s (%dms) - %s\n",
 				a.colors.Red("✗"),
 				a.colors.Cyan(a.colors.Bold(result.Name)),
 				duration,
 				a.colors.Red(result.Error))
+			if result.PrintText != "" {
+				fmt.Printf("  %s\n", a.colors.Dim(result.PrintText))
+			}
 		}
 
 		// Print validations for this step

@@ -401,6 +401,23 @@ func (r *WorkflowRunner) printWorkflowResults(filePath string, results []workflo
 					r.colors.Green("✓"),
 					r.colors.Bold(result.Name),
 					int(result.Duration.Milliseconds()))
+				// Выводим print-текст отдельным блоком, как валидации
+				if result.PrintText != "" {
+					fmt.Printf("  %s\n", r.colors.Dim(result.PrintText))
+				}
+				for _, v := range result.Validations {
+					var valDesc string
+					if v.Error != "" {
+						valDesc = v.Error
+					} else {
+						valDesc = fmt.Sprintf("%s: expected %v, got %v", v.Type, v.Expected, v.Actual)
+					}
+					if v.Passed {
+						fmt.Printf("    %s %s\n", r.colors.Green("✓"), r.colors.Dim(valDesc))
+					} else {
+						fmt.Printf("    %s %s\n", r.colors.Red("✗"), r.colors.Dim(valDesc))
+					}
+				}
 				passed++
 			} else {
 				fmt.Printf("%s %s (%dms) - %s\n",
@@ -408,6 +425,22 @@ func (r *WorkflowRunner) printWorkflowResults(filePath string, results []workflo
 					r.colors.Bold(result.Name),
 					int(result.Duration.Milliseconds()),
 					r.colors.Red(result.Error))
+				if result.PrintText != "" {
+					fmt.Printf("  %s\n", r.colors.Dim(result.PrintText))
+				}
+				for _, v := range result.Validations {
+					var valDesc string
+					if v.Error != "" {
+						valDesc = v.Error
+					} else {
+						valDesc = fmt.Sprintf("%s: expected %v, got %v", v.Type, v.Expected, v.Actual)
+					}
+					if v.Passed {
+						fmt.Printf("    %s %s\n", r.colors.Green("✓"), r.colors.Dim(valDesc))
+					} else {
+						fmt.Printf("    %s %s\n", r.colors.Red("✗"), r.colors.Dim(valDesc))
+					}
+				}
 				failed++
 			}
 		}
