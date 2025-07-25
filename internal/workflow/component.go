@@ -1,10 +1,13 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -25,10 +28,12 @@ type Component struct {
 
 // ComponentManager handles component loading, caching, and dependency resolution
 type ComponentManager struct {
-	searchPaths []string
-	components  map[string]*Component
-	loading     map[string]bool // For cycle detection
-	mu          sync.RWMutex
+	searchPaths  []string
+	components   map[string]*Component
+	loading      map[string]bool // For cycle detection
+	depth        map[string]int  // Track recursion depth for each component
+	loadAttempts map[string]int  // Track load attempts to prevent infinite loops
+	mu           sync.RWMutex
 }
 
 // NewComponentManager creates a new component manager
@@ -45,14 +50,51 @@ func NewComponentManager(searchPaths []string) *ComponentManager {
 	allPaths := append(defaultPaths, searchPaths...)
 
 	return &ComponentManager{
-		searchPaths: allPaths,
-		components:  make(map[string]*Component),
-		loading:     make(map[string]bool),
+		searchPaths:  allPaths,
+		components:   make(map[string]*Component),
+		loading:      make(map[string]bool),
+		depth:        make(map[string]int),
+		loadAttempts: make(map[string]int),
 	}
 }
 
 // LoadComponent loads a component with cycle detection
 func (cm *ComponentManager) LoadComponent(path string) (*Component, error) {
+	return cm.LoadComponentWithTimeout(path, 10*time.Second)
+}
+
+// LoadComponentWithTimeout loads a component with cycle detection and timeout
+func (cm *ComponentManager) LoadComponentWithTimeout(path string, timeout time.Duration) (*Component, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Create a channel for the result
+	resultChan := make(chan *Component, 1)
+	errChan := make(chan error, 1)
+
+	// Run the loading in a goroutine
+	go func() {
+		component, err := cm.loadComponentInternal(path)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		resultChan <- component
+	}()
+
+	// Wait for result or timeout
+	select {
+	case component := <-resultChan:
+		return component, nil
+	case err := <-errChan:
+		return nil, err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("timeout loading component '%s' after %v", path, timeout)
+	}
+}
+
+// loadComponentInternal is the internal implementation of component loading
+func (cm *ComponentManager) loadComponentInternal(path string) (*Component, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -89,7 +131,15 @@ func (cm *ComponentManager) LoadComponent(path string) (*Component, error) {
 		for loadingPath := range cm.loading {
 			loadingStack = append(loadingStack, loadingPath)
 		}
-		fmt.Printf("[DEBUG] Circular import detected: %s (normalized: %s) (loading stack: %v)\n", path, normalizedPath, loadingStack)
+		return nil, fmt.Errorf("circular import detected: %s (loading stack: %v)", path, loadingStack)
+	}
+
+	// Check for cycles by original path as well
+	if cm.loading[path] {
+		loadingStack := make([]string, 0)
+		for loadingPath := range cm.loading {
+			loadingStack = append(loadingStack, loadingPath)
+		}
 		return nil, fmt.Errorf("circular import detected: %s (loading stack: %v)", path, loadingStack)
 	}
 
@@ -99,17 +149,56 @@ func (cm *ComponentManager) LoadComponent(path string) (*Component, error) {
 		for loadingPath := range cm.loading {
 			loadingStack = append(loadingStack, loadingPath)
 		}
-		fmt.Printf("[DEBUG] Circular import detected (by path): %s (loading stack: %v)\n", path, loadingStack)
 		return nil, fmt.Errorf("circular import detected: %s (loading stack: %v)", path, loadingStack)
 	}
 
-	fmt.Printf("[DEBUG] Loading component: %s (normalized: %s)\n", path, normalizedPath)
+	// Additional check: compare with normalized paths
+	for loadingPath := range cm.loading {
+		if filepath.Base(loadingPath) == filepath.Base(path) {
+			loadingStack := make([]string, 0)
+			for lp := range cm.loading {
+				loadingStack = append(loadingStack, lp)
+			}
+			return nil, fmt.Errorf("circular import detected: %s matches %s (loading stack: %v)", path, loadingPath, loadingStack)
+		}
+	}
+
+	// Additional check: compare with normalized paths more aggressively
+	for loadingPath := range cm.loading {
+		// Check if the paths refer to the same file by comparing their base names
+		loadingBase := filepath.Base(loadingPath)
+		pathBase := filepath.Base(path)
+		if loadingBase == pathBase {
+			loadingStack := make([]string, 0)
+			for lp := range cm.loading {
+				loadingStack = append(loadingStack, lp)
+			}
+			return nil, fmt.Errorf("circular import detected: %s matches %s (loading stack: %v)", path, loadingPath, loadingStack)
+		}
+	}
+
+	// Check recursion depth to prevent infinite loops
+	const maxDepth = 100
+	currentDepth := cm.depth[normalizedPath]
+	if currentDepth > maxDepth {
+		return nil, fmt.Errorf("maximum recursion depth exceeded for component '%s' (depth: %d)", path, currentDepth)
+	}
+
+	// Check load attempts to prevent infinite loops
+	const maxAttempts = 10
+	attempts := cm.loadAttempts[normalizedPath]
+	if attempts > maxAttempts {
+		return nil, fmt.Errorf("maximum load attempts exceeded for component '%s' (attempts: %d)", path, attempts)
+	}
+	cm.loadAttempts[normalizedPath] = attempts + 1
+
 	cm.loading[normalizedPath] = true
 	cm.loading[path] = true
+	cm.depth[normalizedPath] = currentDepth + 1
 	defer func() {
 		delete(cm.loading, normalizedPath)
 		delete(cm.loading, path)
-		fmt.Printf("[DEBUG] Finished loading component: %s\n", path)
+		cm.depth[normalizedPath] = currentDepth // Restore previous depth
 	}()
 
 	// Find and load the component
@@ -237,8 +326,6 @@ func (cm *ComponentManager) resolveComponentImports(component *Component) error 
 
 // resolveComponentImport resolves a single import in a component
 func (cm *ComponentManager) resolveComponentImport(component *Component, imp *Import) error {
-	fmt.Printf("[DEBUG] Resolving import: %s for component: %s\n", imp.Path, component.Name)
-
 	// Check if this import would create a circular dependency
 	// by checking if the imported component would try to import the current component
 	if importedComponent, exists := cm.components[imp.Path]; exists {
@@ -251,14 +338,30 @@ func (cm *ComponentManager) resolveComponentImport(component *Component, imp *Im
 		}
 	}
 
-	// Load the imported component
-	importedComponent, err := cm.LoadComponent(imp.Path)
-	if err != nil {
-		fmt.Printf("[DEBUG] Failed to load component %s: %v\n", imp.Path, err)
-		return err
+	// Additional check: if we're currently loading the target component, it's a cycle
+	if cm.loading[imp.Path] {
+		return fmt.Errorf("circular dependency detected: component %s is trying to import %s which is currently being loaded",
+			component.Name, imp.Path)
 	}
 
-	fmt.Printf("[DEBUG] Successfully loaded component: %s (type: %s)\n", importedComponent.Name, importedComponent.Type)
+	// Check for circular dependencies by comparing normalized paths
+	// This handles cases where relative paths might not match exactly
+	for loadingPath := range cm.loading {
+		// Check if the loading path and import path refer to the same file
+		if loadingPath == imp.Path ||
+			filepath.Base(loadingPath) == filepath.Base(imp.Path) ||
+			strings.HasSuffix(loadingPath, imp.Path) ||
+			strings.HasSuffix(imp.Path, loadingPath) {
+			return fmt.Errorf("circular dependency detected: component %s is trying to import %s while %s is being loaded",
+				component.Name, imp.Path, loadingPath)
+		}
+	}
+
+	// Load the imported component with timeout
+	importedComponent, err := cm.LoadComponentWithTimeout(imp.Path, 10*time.Second)
+	if err != nil {
+		return err
+	}
 
 	// Apply variable overrides
 	importedComponent = cm.applyImportOverrides(importedComponent, imp)
@@ -507,8 +610,8 @@ func (cm *ComponentManager) resolveWorkflowImports(wf *Workflow) error {
 
 // resolveWorkflowImport resolves a single import in a workflow
 func (cm *ComponentManager) resolveWorkflowImport(wf *Workflow, imp *Import) error {
-	// Load the imported component
-	importedComponent, err := cm.LoadComponent(imp.Path)
+	// Load the imported component with timeout
+	importedComponent, err := cm.LoadComponentWithTimeout(imp.Path, 10*time.Second)
 	if err != nil {
 		return err
 	}

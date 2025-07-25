@@ -259,7 +259,8 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	for _, imp := range wf.Imports {
 		component, err := componentManager.LoadComponent(imp.Path)
 		if err != nil {
-			continue
+			// Return error instead of continuing to prevent hangs
+			return nil, fmt.Errorf("failed to load component '%s': %w", imp.Path, err)
 		}
 
 		vars := make(map[string]interface{})

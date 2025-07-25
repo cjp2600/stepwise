@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/cjp2600/stepwise/internal/cli"
@@ -24,7 +25,7 @@ func main() {
 
 	// Run the CLI
 	if err := app.Run(os.Args); err != nil {
-		logger.Error("CLI execution failed", "error", err)
+		fmt.Printf("\n✗ %v\n", err)
 		os.Exit(1)
 	}
 
