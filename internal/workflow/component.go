@@ -56,18 +56,61 @@ func (cm *ComponentManager) LoadComponent(path string) (*Component, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
+	// Normalize the path for cycle detection
+	normalizedPath := path
+	if !filepath.IsAbs(path) {
+		// Try to find the absolute path
+		for _, searchPath := range cm.searchPaths {
+			testPath := filepath.Join(searchPath, path)
+			if _, err := os.Stat(testPath); err == nil {
+				normalizedPath = testPath
+				break
+			}
+			// Try with extensions
+			for _, ext := range []string{".yml", ".yaml"} {
+				testPath := filepath.Join(searchPath, path+ext)
+				if _, err := os.Stat(testPath); err == nil {
+					normalizedPath = testPath
+					break
+				}
+			}
+		}
+	}
+
 	// Check if already loaded
-	if component, exists := cm.components[path]; exists {
+	if component, exists := cm.components[normalizedPath]; exists {
 		return component, nil
 	}
 
-	// Check for cycles
-	if cm.loading[path] {
-		return nil, fmt.Errorf("circular import detected: %s", path)
+	// Check for cycles using normalized path
+	if cm.loading[normalizedPath] {
+		// Log the current loading stack for debugging
+		loadingStack := make([]string, 0)
+		for loadingPath := range cm.loading {
+			loadingStack = append(loadingStack, loadingPath)
+		}
+		fmt.Printf("[DEBUG] Circular import detected: %s (normalized: %s) (loading stack: %v)\n", path, normalizedPath, loadingStack)
+		return nil, fmt.Errorf("circular import detected: %s (loading stack: %v)", path, loadingStack)
 	}
 
+	// Check for cycles by path name (for relative paths)
+	if cm.loading[path] {
+		loadingStack := make([]string, 0)
+		for loadingPath := range cm.loading {
+			loadingStack = append(loadingStack, loadingPath)
+		}
+		fmt.Printf("[DEBUG] Circular import detected (by path): %s (loading stack: %v)\n", path, loadingStack)
+		return nil, fmt.Errorf("circular import detected: %s (loading stack: %v)", path, loadingStack)
+	}
+
+	fmt.Printf("[DEBUG] Loading component: %s (normalized: %s)\n", path, normalizedPath)
+	cm.loading[normalizedPath] = true
 	cm.loading[path] = true
-	defer func() { delete(cm.loading, path) }()
+	defer func() {
+		delete(cm.loading, normalizedPath)
+		delete(cm.loading, path)
+		fmt.Printf("[DEBUG] Finished loading component: %s\n", path)
+	}()
 
 	// Find and load the component
 	fullPath := cm.findComponent(path)
@@ -194,11 +237,28 @@ func (cm *ComponentManager) resolveComponentImports(component *Component) error 
 
 // resolveComponentImport resolves a single import in a component
 func (cm *ComponentManager) resolveComponentImport(component *Component, imp *Import) error {
+	fmt.Printf("[DEBUG] Resolving import: %s for component: %s\n", imp.Path, component.Name)
+
+	// Check if this import would create a circular dependency
+	// by checking if the imported component would try to import the current component
+	if importedComponent, exists := cm.components[imp.Path]; exists {
+		// Component already loaded, check if it imports the current component
+		for _, importItem := range importedComponent.Imports {
+			if importItem.Path == component.Name || importItem.Path == "./"+component.Name {
+				return fmt.Errorf("circular dependency detected: component %s imports %s which imports %s",
+					component.Name, imp.Path, component.Name)
+			}
+		}
+	}
+
 	// Load the imported component
 	importedComponent, err := cm.LoadComponent(imp.Path)
 	if err != nil {
+		fmt.Printf("[DEBUG] Failed to load component %s: %v\n", imp.Path, err)
 		return err
 	}
+
+	fmt.Printf("[DEBUG] Successfully loaded component: %s (type: %s)\n", importedComponent.Name, importedComponent.Type)
 
 	// Apply variable overrides
 	importedComponent = cm.applyImportOverrides(importedComponent, imp)

@@ -90,6 +90,12 @@ steps:
 
 Workflow components contain complete workflows that can be imported and extended.
 
+### 4. Flow Components
+
+Flow components are a special type of workflow components designed to organize complex test scenarios into logical groups. They are particularly useful for organizing related steps into reusable, meaningful units.
+
+For detailed information about Flow components, see [FLOW_COMPONENTS.md](FLOW_COMPONENTS.md) and [FLOW_ORGANIZATION.md](FLOW_ORGANIZATION.md).
+
 ```yaml
 name: "API Test Workflow"
 version: "1.0"

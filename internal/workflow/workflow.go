@@ -133,6 +133,12 @@ type StepWithVars struct {
 	Variables map[string]interface{}
 }
 
+// WorkflowWithVars represents a workflow component with its variables
+type WorkflowWithVars struct {
+	Workflow  *Workflow
+	Variables map[string]interface{}
+}
+
 // Executor executes workflows
 type Executor struct {
 	config     *config.Config
@@ -141,6 +147,7 @@ type Executor struct {
 	grpcClient *grpcclient.Client
 	validator  *validation.Validator
 	varManager *variables.Manager
+	executing  map[string]bool // Track currently executing workflows to prevent cycles
 }
 
 // NewExecutor creates a new workflow executor
@@ -152,6 +159,7 @@ func NewExecutor(cfg *config.Config, log *logger.Logger) *Executor {
 		grpcClient: nil, // Will be initialized when needed
 		validator:  validation.NewValidator(log),
 		varManager: variables.NewManager(log),
+		executing:  make(map[string]bool),
 	}
 
 	// Set the variable manager in the validator
@@ -216,11 +224,28 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	e.logger.Info("Starting workflow execution", "name", wf.Name)
 	startTime := time.Now()
 
+	// Check for circular dependencies
+	workflowKey := wf.Name
+	if wf.SourceFile != "" {
+		workflowKey = wf.SourceFile
+	}
+
+	if e.executing[workflowKey] {
+		return nil, fmt.Errorf("circular dependency detected: workflow '%s' is already executing", wf.Name)
+	}
+
+	// Mark workflow as executing
+	e.executing[workflowKey] = true
+	defer func() {
+		delete(e.executing, workflowKey)
+	}()
+
 	// Initialize variables
 	e.initializeVariables(wf.Variables)
 
-	// Собираем карту компонент по имени (только step-компоненты)
+	// Собираем карту компонент по имени (step и workflow компоненты)
 	componentMap := make(map[string]StepWithVars)
+	workflowComponentMap := make(map[string]WorkflowWithVars)
 	// Получаем директорию workflow-файла для корректного поиска компонентов
 	workflowDir := ""
 	if wf != nil && wf.SourceFile != "" {
@@ -236,20 +261,39 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 		if err != nil {
 			continue
 		}
+
+		vars := make(map[string]interface{})
+		for k, v := range component.Variables {
+			vars[k] = v
+		}
+		for k, v := range imp.Variables {
+			vars[k] = v
+		}
+
+		componentName := imp.Alias
+		if componentName == "" {
+			componentName = component.Name
+		}
+
 		if component.Type == "step" && len(component.Steps) == 1 {
-			vars := make(map[string]interface{})
-			for k, v := range component.Variables {
-				vars[k] = v
-			}
-			for k, v := range imp.Variables {
-				vars[k] = v
-			}
-			componentName := imp.Alias
-			if componentName == "" {
-				componentName = component.Name
-			}
 			componentMap[componentName] = StepWithVars{
 				Step:      component.Steps[0],
+				Variables: vars,
+			}
+		} else if component.Type == "workflow" {
+			// Create a workflow from the component
+			workflow := &Workflow{
+				Name:        component.Name,
+				Version:     component.Version,
+				Description: component.Description,
+				Variables:   component.Variables,
+				Steps:       component.Steps,
+				Groups:      component.Groups,
+				Captures:    component.Captures,
+				Imports:     component.Imports, // Add imports support
+			}
+			workflowComponentMap[componentName] = WorkflowWithVars{
+				Workflow:  workflow,
 				Variables: vars,
 			}
 		}
@@ -266,6 +310,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 
 	for _, step := range wf.Steps {
 		if step.Use != "" {
+			// Check for step component
 			if comp, ok := componentMap[step.Use]; ok {
 				mergedStep := comp.Step
 				if step.Capture != nil {
@@ -298,16 +343,62 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				vars := e.varManager.GetAll()
 				e.logger.Info("[DEBUG] Variables after component step", "step", mergedStep.Name, "vars", vars)
 				continue
-			} else {
-				e.logger.Error("Component not found for use step", "use", step.Use)
-				result := &TestResult{
-					Name:   step.Name,
-					Status: "failed",
-					Error:  fmt.Sprintf("Component not found for use: %s", step.Use),
+			}
+
+			// Check for workflow component
+			if workflowComp, ok := workflowComponentMap[step.Use]; ok {
+				e.logger.Info("[WORKFLOW-COMPONENT] Executing workflow component", "use", step.Use, "workflow", workflowComp.Workflow.Name)
+				e.initializeVariables(workflowComp.Variables)
+
+				// Resolve imports for the workflow component
+				if len(workflowComp.Workflow.Imports) > 0 {
+					// Get the directory of the workflow file for relative imports
+					workflowDir := ""
+					if wf != nil && wf.SourceFile != "" {
+						workflowDir = filepath.Dir(wf.SourceFile)
+					}
+					searchPaths := []string{}
+					if workflowDir != "" {
+						searchPaths = append(searchPaths, workflowDir)
+					}
+					componentManager := NewComponentManager(searchPaths)
+					if err := componentManager.resolveWorkflowImports(workflowComp.Workflow); err != nil {
+						result := &TestResult{
+							Name:   step.Name,
+							Status: "failed",
+							Error:  fmt.Sprintf("Failed to resolve workflow component imports: %s", err.Error()),
+						}
+						allResults = append(allResults, *result)
+						continue
+					}
 				}
-				allResults = append(allResults, *result)
+
+				// Execute the workflow component with cycle detection
+				workflowResults, err := e.executeWorkflowWithCycleDetection(workflowComp.Workflow, step.Use)
+				if err != nil {
+					result := &TestResult{
+						Name:   step.Name,
+						Status: "failed",
+						Error:  fmt.Sprintf("Workflow component execution failed: %s", err.Error()),
+					}
+					allResults = append(allResults, *result)
+					continue
+				}
+
+				// Add workflow results to all results
+				allResults = append(allResults, workflowResults...)
 				continue
 			}
+
+			// Component not found
+			e.logger.Error("Component not found for use step", "use", step.Use)
+			result := &TestResult{
+				Name:   step.Name,
+				Status: "failed",
+				Error:  fmt.Sprintf("Component not found for use: %s", step.Use),
+			}
+			allResults = append(allResults, *result)
+			continue
 		}
 		result := &TestResult{
 			Name:         step.Name,
@@ -379,6 +470,29 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	e.logger.Info("Workflow execution completed", "duration", totalDuration, "total_steps", len(allResults))
 
 	return allResults, nil
+}
+
+// executeWorkflowWithCycleDetection executes a workflow component with enhanced cycle detection
+func (e *Executor) executeWorkflowWithCycleDetection(wf *Workflow, componentName string) ([]TestResult, error) {
+	// Create a unique key for this workflow component execution
+	workflowKey := fmt.Sprintf("%s:%s", componentName, wf.Name)
+	if wf.SourceFile != "" {
+		workflowKey = fmt.Sprintf("%s:%s", componentName, wf.SourceFile)
+	}
+
+	// Check for circular dependencies
+	if e.executing[workflowKey] {
+		return nil, fmt.Errorf("circular dependency detected: workflow component '%s' is already executing", componentName)
+	}
+
+	// Mark workflow as executing
+	e.executing[workflowKey] = true
+	defer func() {
+		delete(e.executing, workflowKey)
+	}()
+
+	// Execute the workflow
+	return e.Execute(wf)
 }
 
 // executeGroup executes a group of steps, either sequentially or in parallel

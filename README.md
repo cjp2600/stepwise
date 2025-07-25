@@ -11,7 +11,7 @@ Stepwise is an open-source API testing framework written in Go, inspired by [Ste
 - **Language-Agnostic Configuration**: Support for YAML, JSON, and JavaScript configuration files
 - **Universal Protocol Support**: REST, GraphQL, gRPC, SOAP, and WebSocket APIs
 - **Multi-Step Workflows**: Chain requests together using captures and variables
-- **Advanced Component System**: Reusable components with imports, overrides, and cycle detection
+- **Advanced Component System**: Reusable components with imports, overrides, cycle detection, and Flow components
 - **Recursive Execution**: Control over directory search with `-r` flag
 - **Beautiful Spinners**: Animated progress indicators with CI-aware behavior
 - **Data-Driven Testing**: Import test data or generate mock data
@@ -134,6 +134,53 @@ steps:
     use: "Get Request"
     validate:
       - status: 200
+```
+
+### Flow Components Example
+
+Flow components allow you to organize complex test scenarios into logical groups:
+
+```yaml
+# components/flows/customer-flow.yml
+name: "Customer Flow"
+version: "1.0"
+description: "Complete customer onboarding flow"
+type: "workflow"
+
+imports:
+  - path: "../create-customer"
+    alias: "create-customer"
+  - path: "../get-token"
+    alias: "get-token"
+  - path: "../check-customer-info"
+    alias: "check-customer-info"
+
+steps:
+  - name: "Create new customer"
+    use: "create-customer"
+  
+  - name: "Authenticate customer"
+    use: "get-token"
+  
+  - name: "Verify customer information"
+    use: "check-customer-info"
+```
+
+```yaml
+# workflow.yml
+name: "Complete Purchase Test"
+version: "1.0"
+
+imports:
+  - path: "./components/flows/customer-flow"
+    alias: "customer-flow"
+
+steps:
+  - name: "Customer Onboarding"
+    use: "customer-flow"
+  
+  - name: "Test Summary"
+    print: "Customer flow completed successfully!"
 ```
 
 ### Advanced Workflow Example
