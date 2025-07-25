@@ -240,3 +240,185 @@ func TestUtilsBase64(t *testing.T) {
 		t.Errorf("Expected test123, got %s", decodedVar)
 	}
 }
+
+func TestSubstituteMapWithVariableKeys(t *testing.T) {
+	log := logger.New()
+	manager := NewManager(log)
+
+	// Set up variables
+	manager.Set("purchase_id", "purchase_12345")
+	manager.Set("user_id", "user_67890")
+	manager.Set("order_id", "order_11111")
+
+	// Test map with variable keys
+	input := map[string]interface{}{
+		"purchases": map[string]interface{}{
+			"{{purchase_id}}": map[string]interface{}{
+				"installments_count": 1,
+			},
+		},
+		"orders": map[string]interface{}{
+			"{{order_id}}": map[string]interface{}{
+				"user": "{{user_id}}",
+			},
+		},
+	}
+
+	result, err := manager.SubstituteMap(input)
+	if err != nil {
+		t.Errorf("Failed to substitute map with variable keys: %v", err)
+	}
+
+	// Check that keys were substituted
+	purchases, ok := result["purchases"].(map[string]interface{})
+	if !ok {
+		t.Error("Expected purchases to be a map")
+	}
+
+	if _, exists := purchases["purchase_12345"]; !exists {
+		t.Error("Expected purchase_12345 key to exist after substitution")
+	}
+
+	orders, ok := result["orders"].(map[string]interface{})
+	if !ok {
+		t.Error("Expected orders to be a map")
+	}
+
+	if _, exists := orders["order_11111"]; !exists {
+		t.Error("Expected order_11111 key to exist after substitution")
+	}
+
+	orderData, ok := orders["order_11111"].(map[string]interface{})
+	if !ok {
+		t.Error("Expected order data to be a map")
+	}
+
+	if user, exists := orderData["user"]; !exists || user != "user_67890" {
+		t.Errorf("Expected user to be 'user_67890', got %v", user)
+	}
+}
+
+func TestSubstituteMapWithNestedVariableKeys(t *testing.T) {
+	log := logger.New()
+	manager := NewManager(log)
+
+	// Set up variables
+	manager.Set("user_id", "user_123")
+	manager.Set("order_id", "order_456")
+	manager.Set("product_id", "product_789")
+
+	// Test nested structure with variable keys
+	input := map[string]interface{}{
+		"{{user_id}}_data": map[string]interface{}{
+			"{{order_id}}_details": map[string]interface{}{
+				"{{product_id}}_info": map[string]interface{}{
+					"status": "active",
+					"price":  150.00,
+				},
+			},
+		},
+	}
+
+	result, err := manager.SubstituteMap(input)
+	if err != nil {
+		t.Errorf("Failed to substitute nested map with variable keys: %v", err)
+	}
+
+	// Check nested structure
+	userData, ok := result["user_123_data"].(map[string]interface{})
+	if !ok {
+		t.Error("Expected user_123_data to be a map")
+	}
+
+	orderDetails, ok := userData["order_456_details"].(map[string]interface{})
+	if !ok {
+		t.Error("Expected order_456_details to be a map")
+	}
+
+	productInfo, ok := orderDetails["product_789_info"].(map[string]interface{})
+	if !ok {
+		t.Error("Expected product_789_info to be a map")
+	}
+
+	if status, exists := productInfo["status"]; !exists || status != "active" {
+		t.Errorf("Expected status to be 'active', got %v", status)
+	}
+
+	if price, exists := productInfo["price"]; !exists || price != 150.00 {
+		t.Errorf("Expected price to be 150.00, got %v", price)
+	}
+}
+
+func TestSubstituteMapWithUtilsInKeys(t *testing.T) {
+	log := logger.New()
+	manager := NewManager(log)
+
+	// Test map with utils functions in keys
+	input := map[string]interface{}{
+		"{{utils.base64('test_key')}}": map[string]interface{}{
+			"value": "test_value",
+		},
+		"{{utils.base64('another_key')}}": map[string]interface{}{
+			"value": "another_value",
+		},
+	}
+
+	result, err := manager.SubstituteMap(input)
+	if err != nil {
+		t.Errorf("Failed to substitute map with utils in keys: %v", err)
+	}
+
+	// Check that base64 encoded keys exist
+	expectedKey1 := "dGVzdF9rZXk="     // base64 of "test_key"
+	expectedKey2 := "YW5vdGhlcl9rZXk=" // base64 of "another_key"
+
+	if _, exists := result[expectedKey1]; !exists {
+		t.Errorf("Expected key %s to exist after substitution", expectedKey1)
+	}
+
+	if _, exists := result[expectedKey2]; !exists {
+		t.Errorf("Expected key %s to exist after substitution", expectedKey2)
+	}
+}
+
+func TestSubstituteMapWithFakerInKeys(t *testing.T) {
+	log := logger.New()
+	manager := NewManager(log)
+
+	// Test map with faker functions in keys
+	input := map[string]interface{}{
+		"user_{{faker.uuid}}": map[string]interface{}{
+			"name":  "{{faker.name}}",
+			"email": "{{faker.email}}",
+		},
+		"order_{{faker.uuid}}": map[string]interface{}{
+			"status": "pending",
+		},
+	}
+
+	result, err := manager.SubstituteMap(input)
+	if err != nil {
+		t.Errorf("Failed to substitute map with faker in keys: %v", err)
+	}
+
+	// Check that at least one key was generated (we can't predict exact values)
+	foundUserKey := false
+	foundOrderKey := false
+
+	for key := range result {
+		if strings.HasPrefix(key, "user_") && len(key) > 5 {
+			foundUserKey = true
+		}
+		if strings.HasPrefix(key, "order_") && len(key) > 6 {
+			foundOrderKey = true
+		}
+	}
+
+	if !foundUserKey {
+		t.Error("Expected to find a user key with faker.uuid")
+	}
+
+	if !foundOrderKey {
+		t.Error("Expected to find an order key with faker.uuid")
+	}
+}

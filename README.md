@@ -15,6 +15,7 @@ Stepwise is an open-source API testing framework written in Go, inspired by [Ste
 - **Recursive Execution**: Control over directory search with `-r` flag
 - **Beautiful Spinners**: Animated progress indicators with CI-aware behavior
 - **Data-Driven Testing**: Import test data or generate mock data
+- **Variable Keys Support**: Use variables in JSON object keys for dynamic key generation
 - **Comprehensive Validation**: JSON Schema, XML, HTML validation with custom matchers
 - **Performance Testing**: Load testing capabilities with parallel execution
 - **Security Features**: SSL certificate validation, authentication support

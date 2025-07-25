@@ -145,7 +145,7 @@ type Executor struct {
 
 // NewExecutor creates a new workflow executor
 func NewExecutor(cfg *config.Config, log *logger.Logger) *Executor {
-	return &Executor{
+	executor := &Executor{
 		config:     cfg,
 		logger:     log,
 		httpClient: httpclient.NewClient(cfg.Timeout, log),
@@ -153,6 +153,11 @@ func NewExecutor(cfg *config.Config, log *logger.Logger) *Executor {
 		validator:  validation.NewValidator(log),
 		varManager: variables.NewManager(log),
 	}
+
+	// Set the variable manager in the validator
+	executor.validator.SetVariableManager(executor.varManager)
+
+	return executor
 }
 
 // Load loads a workflow from a file
@@ -1070,15 +1075,21 @@ func (e *Executor) captureValues(response *httpclient.Response, captures map[str
 
 // extractJSONValue extracts a value from JSON data using JSONPath-like syntax
 func (e *Executor) extractJSONValue(data interface{}, path string) (interface{}, error) {
+	// Substitute variables in the path first
+	substitutedPath, err := e.varManager.Substitute(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to substitute variables in path '%s': %w", path, err)
+	}
+
 	// Simple JSONPath-like extraction
 	// For now, handle basic cases like "$.key" or "$[0]"
-	if path == "$" {
+	if substitutedPath == "$" {
 		return data, nil
 	}
 
 	// Поддержка вложенных ключей: $.a.b.c
-	if strings.HasPrefix(path, "$.") {
-		keys := strings.Split(strings.TrimPrefix(path, "$."), ".")
+	if strings.HasPrefix(substitutedPath, "$.") {
+		keys := strings.Split(strings.TrimPrefix(substitutedPath, "$."), ".")
 		current := data
 		for _, key := range keys {
 			if mapData, ok := current.(map[string]interface{}); ok {
@@ -1094,8 +1105,8 @@ func (e *Executor) extractJSONValue(data interface{}, path string) (interface{},
 		return current, nil
 	}
 
-	if strings.HasPrefix(path, "$[") && strings.HasSuffix(path, "]") {
-		indexStr := strings.TrimPrefix(strings.TrimSuffix(path, "]"), "$[")
+	if strings.HasPrefix(substitutedPath, "$[") && strings.HasSuffix(substitutedPath, "]") {
+		indexStr := strings.TrimPrefix(strings.TrimSuffix(substitutedPath, "]"), "$[")
 		index, err := strconv.Atoi(indexStr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid array index: %s", indexStr)
@@ -1108,7 +1119,7 @@ func (e *Executor) extractJSONValue(data interface{}, path string) (interface{},
 		return nil, fmt.Errorf("array index out of bounds: %d", index)
 	}
 
-	return nil, fmt.Errorf("unsupported JSON path: %s", path)
+	return nil, fmt.Errorf("unsupported JSON path: %s", substitutedPath)
 }
 
 // parseTimeout parses a timeout string into duration

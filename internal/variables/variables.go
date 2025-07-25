@@ -306,44 +306,94 @@ func (m *Manager) generateSHA() string {
 	return fmt.Sprintf("%040x", timestamp)
 }
 
-// SubstituteMap substitutes variables in a map
+// SubstituteMap substitutes variables in a map, including keys
 func (m *Manager) SubstituteMap(input map[string]interface{}) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
+
+	// First pass: substitute variables in keys and values
 	for key, value := range input {
-		result[key] = value
+		// Substitute variables in the key
+		substitutedKey, err := m.Substitute(key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to substitute key '%s': %w", key, err)
+		}
+
+		// Substitute variables in the value
+		switch v := value.(type) {
+		case string:
+			substitutedValue, err := m.Substitute(v)
+			if err != nil {
+				return nil, fmt.Errorf("failed to substitute value for key '%s': %w", key, err)
+			}
+			result[substitutedKey] = substitutedValue
+		case map[string]interface{}:
+			substitutedValue, err := m.SubstituteMap(v)
+			if err != nil {
+				return nil, fmt.Errorf("failed to substitute map value for key '%s': %w", key, err)
+			}
+			result[substitutedKey] = substitutedValue
+		case []interface{}:
+			substitutedValue, err := m.SubstituteSlice(v)
+			if err != nil {
+				return nil, fmt.Errorf("failed to substitute slice value for key '%s': %w", key, err)
+			}
+			result[substitutedKey] = substitutedValue
+		default:
+			result[substitutedKey] = value
+		}
 	}
 
+	// Second pass: handle nested substitutions (in case key substitution created new variables)
 	for i := 0; i < 10; i++ {
 		changed := false
+		newResult := make(map[string]interface{})
+
 		for key, value := range result {
+			// Check if key needs further substitution
+			substitutedKey, err := m.Substitute(key)
+			if err != nil {
+				return nil, fmt.Errorf("failed to substitute key '%s' in second pass: %w", key, err)
+			}
+
+			if substitutedKey != key {
+				changed = true
+				newResult[substitutedKey] = value
+			} else {
+				newResult[key] = value
+			}
+
+			// Check if value needs further substitution
 			switch v := value.(type) {
 			case string:
-				substituted, err := m.Substitute(v)
+				substitutedValue, err := m.Substitute(v)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("failed to substitute value for key '%s' in second pass: %w", key, err)
 				}
-				if substituted != v {
+				if substitutedValue != v {
 					changed = true
+					newResult[substitutedKey] = substitutedValue
 				}
-				result[key] = substituted
 			case map[string]interface{}:
-				substituted, err := m.SubstituteMap(v)
+				substitutedValue, err := m.SubstituteMap(v)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("failed to substitute map value for key '%s' in second pass: %w", key, err)
 				}
-				result[key] = substituted
+				newResult[substitutedKey] = substitutedValue
 			case []interface{}:
-				substituted, err := m.SubstituteSlice(v)
+				substitutedValue, err := m.SubstituteSlice(v)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("failed to substitute slice value for key '%s' in second pass: %w", key, err)
 				}
-				result[key] = substituted
+				newResult[substitutedKey] = substitutedValue
 			}
 		}
+
+		result = newResult
 		if !changed {
 			break
 		}
 	}
+
 	return result, nil
 }
 

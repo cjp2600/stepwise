@@ -12,11 +12,13 @@ import (
 
 	"github.com/cjp2600/stepwise/internal/http"
 	"github.com/cjp2600/stepwise/internal/logger"
+	"github.com/cjp2600/stepwise/internal/variables"
 )
 
 // Validator represents a validation engine
 type Validator struct {
-	logger *logger.Logger
+	logger     *logger.Logger
+	varManager *variables.Manager
 }
 
 // ValidationRule represents a validation rule
@@ -53,8 +55,14 @@ type ValidationResult struct {
 // NewValidator creates a new validator
 func NewValidator(log *logger.Logger) *Validator {
 	return &Validator{
-		logger: log,
+		logger:     log,
+		varManager: variables.NewManager(log),
 	}
+}
+
+// SetVariableManager sets the variable manager for the validator
+func (v *Validator) SetVariableManager(varManager *variables.Manager) {
+	v.varManager = varManager
 }
 
 // Validate validates a response against validation rules
@@ -340,9 +348,17 @@ func (v *Validator) validateXML(response *http.Response, rule ValidationRule) Va
 
 // validateEquals validates equality
 func (v *Validator) validateEquals(actual, expected interface{}) ValidationResult {
+	// Substitute variables in expected value if it's a string
+	var substitutedExpected interface{} = expected
+	if expectedStr, ok := expected.(string); ok {
+		if substitutedStr, err := v.varManager.Substitute(expectedStr); err == nil {
+			substitutedExpected = substitutedStr
+		}
+	}
+
 	// Convert both values to float64 for numeric comparison
 	actualFloat, actualOk := v.toFloat64(actual)
-	expectedFloat, expectedOk := v.toFloat64(expected)
+	expectedFloat, expectedOk := v.toFloat64(substitutedExpected)
 
 	var passed bool
 	if actualOk && expectedOk {
@@ -350,15 +366,15 @@ func (v *Validator) validateEquals(actual, expected interface{}) ValidationResul
 		passed = actualFloat == expectedFloat
 	} else {
 		// Use deep equality for non-numeric values
-		passed = reflect.DeepEqual(actual, expected)
+		passed = reflect.DeepEqual(actual, substitutedExpected)
 	}
 
 	return ValidationResult{
 		Type:     "equals",
-		Expected: expected,
+		Expected: substitutedExpected,
 		Actual:   actual,
 		Passed:   passed,
-		Error:    v.getErrorMessage(passed, "value", expected, actual),
+		Error:    v.getErrorMessage(passed, "value", substitutedExpected, actual),
 	}
 }
 
@@ -479,13 +495,19 @@ func (v *Validator) compareDuration(actual, expected time.Duration, rule string)
 }
 
 func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}, error) {
+	// Substitute variables in the path first
+	substitutedPath, err := v.varManager.Substitute(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to substitute variables in path '%s': %w", path, err)
+	}
+
 	// Поддержка сложных путей с массивами: $.widgets[0].widget
-	if path == "$" {
+	if substitutedPath == "$" {
 		return data, nil
 	}
 
-	if strings.HasPrefix(path, "$.") {
-		pathExpr := strings.TrimPrefix(path, "$.")
+	if strings.HasPrefix(substitutedPath, "$.") {
+		pathExpr := strings.TrimPrefix(substitutedPath, "$.")
 		// Разбиваем путь на части с учётом индексов
 		var parts []string
 		var buf strings.Builder
@@ -552,8 +574,8 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 		return current, nil
 	}
 
-	if strings.HasPrefix(path, "$[") && strings.HasSuffix(path, "]") {
-		indexStr := strings.TrimPrefix(strings.TrimSuffix(path, "]"), "$[")
+	if strings.HasPrefix(substitutedPath, "$[") && strings.HasSuffix(substitutedPath, "]") {
+		indexStr := strings.TrimPrefix(strings.TrimSuffix(substitutedPath, "]"), "$[")
 		index, err := strconv.Atoi(indexStr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid array index: %s", indexStr)
@@ -567,7 +589,7 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 		return nil, fmt.Errorf("array index out of bounds: %d", index)
 	}
 
-	return nil, fmt.Errorf("unsupported JSON path: %s", path)
+	return nil, fmt.Errorf("unsupported JSON path: %s", substitutedPath)
 }
 
 func (v *Validator) matchesType(value interface{}, expectedType string) bool {
