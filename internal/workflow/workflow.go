@@ -1081,25 +1081,74 @@ func (e *Executor) extractJSONValue(data interface{}, path string) (interface{},
 		return nil, fmt.Errorf("failed to substitute variables in path '%s': %w", path, err)
 	}
 
-	// Simple JSONPath-like extraction
-	// For now, handle basic cases like "$.key" or "$[0]"
+	// Поддержка сложных путей с массивами: $.widgets[0].widget
 	if substitutedPath == "$" {
 		return data, nil
 	}
 
-	// Поддержка вложенных ключей: $.a.b.c
 	if strings.HasPrefix(substitutedPath, "$.") {
-		keys := strings.Split(strings.TrimPrefix(substitutedPath, "$."), ".")
+		pathExpr := strings.TrimPrefix(substitutedPath, "$.")
+		// Разбиваем путь на части с учётом индексов
+		var parts []string
+		var buf strings.Builder
+		inBracket := false
+		for _, r := range pathExpr {
+			if r == '.' && !inBracket {
+				parts = append(parts, buf.String())
+				buf.Reset()
+			} else {
+				if r == '[' {
+					inBracket = true
+				}
+				if r == ']' {
+					inBracket = false
+				}
+				buf.WriteRune(r)
+			}
+		}
+		if buf.Len() > 0 {
+			parts = append(parts, buf.String())
+		}
 		current := data
-		for _, key := range keys {
-			if mapData, ok := current.(map[string]interface{}); ok {
-				if value, exists := mapData[key]; exists {
-					current = value
+		for _, part := range parts {
+			// Массив с индексом: key[index]
+			if strings.Contains(part, "[") && strings.HasSuffix(part, "]") {
+				openBracket := strings.Index(part, "[")
+				closeBracket := strings.Index(part, "]")
+				key := part[:openBracket]
+				indexStr := part[openBracket+1 : closeBracket]
+				if mapData, ok := current.(map[string]interface{}); ok {
+					if array, exists := mapData[key]; exists {
+						if arrayData, ok := array.([]interface{}); ok {
+							index, err := strconv.Atoi(indexStr)
+							if err != nil {
+								return nil, fmt.Errorf("invalid array index: %s", indexStr)
+							}
+							if index >= 0 && index < len(arrayData) {
+								current = arrayData[index]
+							} else {
+								return nil, fmt.Errorf("array index out of bounds: %d", index)
+							}
+						} else {
+							return nil, fmt.Errorf("key %s is not an array", key)
+						}
+					} else {
+						return nil, fmt.Errorf("key not found: %s", key)
+					}
 				} else {
-					return nil, fmt.Errorf("key not found: %s", key)
+					return nil, fmt.Errorf("cannot access array on non-object")
 				}
 			} else {
-				return nil, fmt.Errorf("not a map at: %s", key)
+				// Обычный ключ
+				if mapData, ok := current.(map[string]interface{}); ok {
+					if value, exists := mapData[part]; exists {
+						current = value
+					} else {
+						return nil, fmt.Errorf("key not found: %s", part)
+					}
+				} else {
+					return nil, fmt.Errorf("cannot access key on non-object")
+				}
 			}
 		}
 		return current, nil
@@ -1115,6 +1164,7 @@ func (e *Executor) extractJSONValue(data interface{}, path string) (interface{},
 			if index >= 0 && index < len(arrayData) {
 				return arrayData[index], nil
 			}
+			return nil, fmt.Errorf("array index out of bounds: %d", index)
 		}
 		return nil, fmt.Errorf("array index out of bounds: %d", index)
 	}
