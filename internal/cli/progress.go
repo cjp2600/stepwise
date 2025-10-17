@@ -53,81 +53,48 @@ func (p *LiveProgressReporter) Start() {
 	p.running = true
 	p.mu.Unlock()
 
-	if !p.colors.IsEnabled() {
-		// Simple text mode - just print header
-		fmt.Println("\n" + strings.Repeat("=", 50))
-		fmt.Println("Starting Workflow Execution")
-		fmt.Println(strings.Repeat("=", 50))
-		return
-	}
-
-	// Hide cursor for interactive mode
-	fmt.Print("\033[?25l")
-	
-	// Initial render
-	p.render()
+	// Always use simple text mode - print header
+	fmt.Println("\n" + strings.Repeat("=", 50))
+	fmt.Println("Starting Workflow Execution")
+	fmt.Println(strings.Repeat("=", 50))
 }
 
 // Stop stops the live progress reporter
 func (p *LiveProgressReporter) Stop() {
-	if !p.colors.IsEnabled() {
-		return
-	}
-
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.running = false
-	p.mu.Unlock()
-
-	// Show cursor
-	fmt.Print("\033[?25h")
-	
-	// Move cursor to after the progress display
-	p.clearDisplay()
 }
 
 // Update updates the progress with a new step
 func (p *LiveProgressReporter) Update(update ProgressUpdate) {
-	if !p.colors.IsEnabled() {
-		// Fallback for non-color mode - simple text progress
-		if update.Status == "running" {
-			fmt.Printf("[%d/%d] Running: %s...\n", update.StepIndex, update.TotalSteps, update.StepName)
-		} else if update.Status == "passed" {
-			validationInfo := ""
-			if update.ValidationCount > 0 {
-				validationInfo = fmt.Sprintf(" [%d/%d validations passed]", update.ValidationsPassed, update.ValidationCount)
-			}
-			fmt.Printf("[%d/%d] ✓ PASS: %s (%dms)%s\n", 
-				update.StepIndex, update.TotalSteps, update.StepName, 
-				update.Duration.Milliseconds(), validationInfo)
-		} else if update.Status == "failed" {
-			fmt.Printf("[%d/%d] ✗ FAIL: %s (%dms) - %s\n", 
-				update.StepIndex, update.TotalSteps, update.StepName, 
-				update.Duration.Milliseconds(), update.Error)
+	// Always use simple text mode for now (ANSI interactive mode has issues in many terminals)
+	// TODO: Add proper terminal capability detection
+	if update.Status == "running" {
+		fmt.Printf("[%d/%d] Running: %s...\n", update.StepIndex, update.TotalSteps, update.StepName)
+	} else if update.Status == "passed" {
+		validationInfo := ""
+		if update.ValidationCount > 0 {
+			validationInfo = fmt.Sprintf(" [%d/%d validations passed]", update.ValidationsPassed, update.ValidationCount)
 		}
-		return
+		fmt.Printf("[%d/%d] ✓ PASS: %s (%dms)%s\n", 
+			update.StepIndex, update.TotalSteps, update.StepName, 
+			update.Duration.Milliseconds(), validationInfo)
+	} else if update.Status == "failed" {
+		fmt.Printf("[%d/%d] ✗ FAIL: %s (%dms) - %s\n", 
+			update.StepIndex, update.TotalSteps, update.StepName, 
+			update.Duration.Milliseconds(), update.Error)
 	}
-
+	
+	// Update internal state for summary
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	p.currentStep = update.StepName
-	p.currentIndex = update.StepIndex
-	p.lastUpdate = time.Now()
-
+	
 	if update.Status == "passed" {
 		p.passed++
-		p.history = append(p.history, update)
 	} else if update.Status == "failed" {
 		p.failed++
-		p.history = append(p.history, update)
 	}
-
-	// Keep only last N items in history
-	if len(p.history) > p.maxHistory {
-		p.history = p.history[len(p.history)-p.maxHistory:]
-	}
-
-	p.render()
 }
 
 // render renders the current progress display
@@ -237,27 +204,16 @@ func (p *LiveProgressReporter) Complete() {
 
 	p.running = false
 
-	if !p.colors.IsEnabled() {
-		// Simple text mode - print summary
-		elapsed := time.Since(p.startTime)
-		total := p.passed + p.failed
-		if total > 0 {
-			successRate := float64(p.passed) / float64(total) * 100
-			fmt.Println("\n" + strings.Repeat("=", 50))
-			fmt.Printf("Workflow Execution Completed in %.2fs\n", elapsed.Seconds())
-			fmt.Printf("Steps: %d total, %d passed, %d failed (%.1f%% success)\n", 
-				total, p.passed, p.failed, successRate)
-			fmt.Println(strings.Repeat("=", 50) + "\n")
-		}
-		return
+	// Simple text mode - print summary
+	elapsed := time.Since(p.startTime)
+	total := p.passed + p.failed
+	if total > 0 {
+		successRate := float64(p.passed) / float64(total) * 100
+		fmt.Println("\n" + strings.Repeat("=", 50))
+		fmt.Printf("Workflow Execution Completed in %.2fs\n", elapsed.Seconds())
+		fmt.Printf("Steps: %d total, %d passed, %d failed (%.1f%% success)\n", 
+			total, p.passed, p.failed, successRate)
+		fmt.Println(strings.Repeat("=", 50) + "\n")
 	}
-
-	// Clear the live progress display
-	p.clearDisplay()
-	
-	// Show cursor
-	fmt.Print("\033[?25h")
-	
-	fmt.Println() // Add spacing after live progress
 }
 

@@ -297,12 +297,12 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 					Status:       "pending",
 					CapturedData: make(map[string]interface{}),
 				}
-				
+
 				// Notify progress callback that step is starting
 				if e.progressCallback != nil {
 					e.progressCallback(mergedStep.Name, stepIndex+1, totalSteps, "running", 0, 0, 0, nil)
 				}
-				
+
 				if err := e.executeStepWithRepeat(&mergedStep, result); err != nil {
 					result.Status = "failed"
 					result.Error = err.Error()
@@ -310,7 +310,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				} else {
 					result.Status = "passed"
 				}
-				
+
 				// Notify progress callback of completion
 				if e.progressCallback != nil {
 					validationsPassed := 0
@@ -322,7 +322,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 					}
 					e.progressCallback(mergedStep.Name, stepIndex+1, totalSteps, result.Status, result.Duration, validationsPassed, validationsTotal, nil)
 				}
-				
+
 				allResults = append(allResults, *result)
 				vars := e.varManager.GetAll()
 				e.logger.Info("[DEBUG] Variables after component step", "step", mergedStep.Name, "vars", vars)
@@ -351,12 +351,12 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				continue
 			}
 		}
-		
+
 		// Notify progress callback that step is starting
 		if e.progressCallback != nil {
 			e.progressCallback(step.Name, stepIndex+1, totalSteps, "running", 0, 0, 0, nil)
 		}
-		
+
 		if err := e.executeStepWithRepeat(&step, result); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
@@ -364,7 +364,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 		} else {
 			result.Status = "passed"
 		}
-		
+
 		// Notify progress callback of completion
 		if e.progressCallback != nil {
 			validationsPassed := 0
@@ -380,7 +380,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 			}
 			e.progressCallback(step.Name, stepIndex+1, totalSteps, result.Status, result.Duration, validationsPassed, validationsTotal, resultErr)
 		}
-		
+
 		allResults = append(allResults, *result)
 		vars := e.varManager.GetAll()
 		e.logger.Info("[DEBUG] Variables after step", "step", step.Name, "vars", vars)

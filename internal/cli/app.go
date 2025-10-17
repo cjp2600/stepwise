@@ -172,7 +172,7 @@ func (a *App) handleRun(args []string) error {
 		}
 
 		executor := workflow.NewExecutor(a.config, a.logger)
-		
+
 		// Setup live progress reporter if not in verbose mode
 		var progressReporter *LiveProgressReporter
 		if !*verbose {
@@ -180,7 +180,7 @@ func (a *App) handleRun(args []string) error {
 			if len(wf.Steps) > 0 {
 				progressReporter = NewLiveProgressReporter(a.colors, len(wf.Steps))
 				progressReporter.Start()
-				
+
 				// Set progress callback
 				executor.SetProgressCallback(func(stepName string, stepIndex int, totalSteps int, status string, duration time.Duration, validationsPassed int, validationsTotal int, err error) {
 					update := ProgressUpdate{
@@ -199,14 +199,14 @@ func (a *App) handleRun(args []string) error {
 				})
 			}
 		}
-		
+
 		results, err := executor.Execute(wf)
-		
+
 		// Stop and complete progress reporter
 		if progressReporter != nil {
 			progressReporter.Complete()
 		}
-		
+
 		if err != nil {
 			if !*verbose {
 				fmt.Printf("✗ Workflow execution failed: %v\n", err)
