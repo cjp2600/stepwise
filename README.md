@@ -349,6 +349,31 @@ validate:
     pattern: "^[^@]+@[^@]+\\.[^@]+$"
 ```
 
+### Advanced Array Filters
+
+Find array elements by condition instead of hardcoded index:
+
+```yaml
+validate:
+  # Find user by name, regardless of position
+  - json: "$[?(@.name == \"Alice\")].email"
+    type: "string"
+  
+  # Find product by price
+  - json: "$[?(@.price > 100)].name"
+    type: "string"
+  
+  # Get last element
+  - json: "$[last].id"
+    type: "number"
+  
+  # Get array slice
+  - json: "$[0:3]"
+    type: "array"
+```
+
+See [Array Filters Documentation](docs/ARRAY_FILTERS.md) for complete guide.
+
 ### Time Validation
 
 ```yaml
@@ -555,6 +580,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **[CLI Reference](docs/CLI.md)** - Complete command-line interface guide
 - **[Component System](docs/COMPONENTS.md)** - Reusable components and templates
 - **[Import System](docs/IMPORTS.md)** - Advanced import functionality
+- **[Array Filters](docs/ARRAY_FILTERS.md)** - Advanced JSONPath array filtering
 - **[API Reference](docs/API.md)** - Complete API documentation
 
 ## Support

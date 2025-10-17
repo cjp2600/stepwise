@@ -531,33 +531,52 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 		}
 		current := data
 		for _, part := range parts {
-			// Массив с индексом: key[index]
+			// Special handling for "length" property on arrays
+			if part == "length" {
+				if arr, ok := current.([]interface{}); ok {
+					return len(arr), nil
+				}
+				return nil, fmt.Errorf("cannot get length of non-array")
+			}
+
+			// Массив с индексом или фильтром: key[index] или key[?(...)]
 			if strings.Contains(part, "[") && strings.HasSuffix(part, "]") {
 				openBracket := strings.Index(part, "[")
-				closeBracket := strings.Index(part, "]")
+				closeBracket := strings.LastIndex(part, "]")
 				key := part[:openBracket]
 				indexStr := part[openBracket+1 : closeBracket]
-				if mapData, ok := current.(map[string]interface{}); ok {
-					if array, exists := mapData[key]; exists {
-						if arrayData, ok := array.([]interface{}); ok {
-							index, err := strconv.Atoi(indexStr)
-							if err != nil {
-								return nil, fmt.Errorf("invalid array index: %s", indexStr)
-							}
-							if index >= 0 && index < len(arrayData) {
-								current = arrayData[index]
+
+				// Получить массив из текущего объекта или использовать текущий, если это уже массив
+				var arrayData []interface{}
+				if key != "" {
+					if mapData, ok := current.(map[string]interface{}); ok {
+						if array, exists := mapData[key]; exists {
+							if arr, ok := array.([]interface{}); ok {
+								arrayData = arr
 							} else {
-								return nil, nil // Пустой массив
+								return nil, fmt.Errorf("key %s is not an array", key)
 							}
 						} else {
-							return nil, fmt.Errorf("key %s is not an array", key)
+							return nil, fmt.Errorf("key not found: %s", key)
 						}
 					} else {
-						return nil, fmt.Errorf("key not found: %s", key)
+						return nil, fmt.Errorf("cannot access key on non-object")
 					}
 				} else {
-					return nil, fmt.Errorf("cannot access array on non-object")
+					// key пустой, значит применяем фильтр к текущему массиву
+					if arr, ok := current.([]interface{}); ok {
+						arrayData = arr
+					} else {
+						return nil, fmt.Errorf("cannot apply array filter to non-array")
+					}
 				}
+
+				// Обработать фильтр или индекс
+				result, err := v.processArrayAccessor(arrayData, indexStr)
+				if err != nil {
+					return nil, err
+				}
+				current = result
 			} else {
 				// Обычный ключ
 				if mapData, ok := current.(map[string]interface{}); ok {
@@ -574,22 +593,280 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 		return current, nil
 	}
 
-	if strings.HasPrefix(substitutedPath, "$[") && strings.HasSuffix(substitutedPath, "]") {
-		indexStr := strings.TrimPrefix(strings.TrimSuffix(substitutedPath, "]"), "$[")
-		index, err := strconv.Atoi(indexStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid array index: %s", indexStr)
+	if strings.HasPrefix(substitutedPath, "$[") {
+		// Handle paths like $[0] or $[filter] or $[filter].field
+		closeBracket := strings.Index(substitutedPath, "]")
+		if closeBracket == -1 {
+			return nil, fmt.Errorf("unclosed bracket in path: %s", substitutedPath)
 		}
+
+		indexStr := substitutedPath[2:closeBracket]
+		remainingPath := substitutedPath[closeBracket+1:]
+
+		// Apply array accessor
 		if arrayData, ok := data.([]interface{}); ok {
-			if index >= 0 && index < len(arrayData) {
-				return arrayData[index], nil
+			result, err := v.processArrayAccessor(arrayData, indexStr)
+			if err != nil {
+				return nil, err
 			}
-			return nil, nil // Пустой массив
+
+			// If there's a remaining path, continue processing
+			if remainingPath != "" {
+				if strings.HasPrefix(remainingPath, ".") {
+					remainingPath = "$" + remainingPath
+				}
+				return v.extractJSONValue(result, remainingPath)
+			}
+
+			return result, nil
 		}
-		return nil, fmt.Errorf("array index out of bounds: %d", index)
+		return nil, fmt.Errorf("root element is not an array")
 	}
 
 	return nil, fmt.Errorf("unsupported JSON path: %s", substitutedPath)
+}
+
+// processArrayAccessor handles array access with index, filter, or special selectors
+func (v *Validator) processArrayAccessor(arrayData []interface{}, accessor string) (interface{}, error) {
+	if len(arrayData) == 0 {
+		return nil, nil
+	}
+
+	// Filter expression: ?(@.field op value) or ?(@.field)
+	if strings.HasPrefix(accessor, "?(@.") && strings.HasSuffix(accessor, ")") {
+		return v.filterArray(arrayData, accessor)
+	}
+
+	// Wildcard: return all elements
+	if accessor == "*" {
+		return arrayData, nil
+	}
+
+	// Last element
+	if accessor == "last" || accessor == "-1" {
+		return arrayData[len(arrayData)-1], nil
+	}
+
+	// Slice: start:end
+	if strings.Contains(accessor, ":") {
+		return v.sliceArray(arrayData, accessor)
+	}
+
+	// Simple numeric index
+	index, err := strconv.Atoi(accessor)
+	if err != nil {
+		return nil, fmt.Errorf("invalid array accessor: %s", accessor)
+	}
+
+	// Handle negative indices
+	if index < 0 {
+		index = len(arrayData) + index
+	}
+
+	if index >= 0 && index < len(arrayData) {
+		return arrayData[index], nil
+	}
+
+	return nil, fmt.Errorf("array index out of bounds: %d (length: %d)", index, len(arrayData))
+}
+
+// filterArray filters array elements based on condition
+func (v *Validator) filterArray(arrayData []interface{}, filter string) (interface{}, error) {
+	// Remove ?(@. prefix and ) suffix
+	filter = strings.TrimPrefix(filter, "?(@.")
+	filter = strings.TrimSuffix(filter, ")")
+
+	// Parse filter expression: field op value or just field
+	var field, operator, expectedValue string
+
+	// Try to find operator
+	operators := []string{"==", "!=", ">=", "<=", ">", "<", "="}
+	for _, op := range operators {
+		if strings.Contains(filter, op) {
+			parts := strings.SplitN(filter, op, 2)
+			field = strings.TrimSpace(parts[0])
+			operator = op
+			if len(parts) > 1 {
+				expectedValue = strings.TrimSpace(parts[1])
+				// Remove quotes if present
+				expectedValue = strings.Trim(expectedValue, "\"'")
+			}
+			break
+		}
+	}
+
+	// No operator found, check for boolean field
+	if operator == "" {
+		field = strings.TrimSpace(filter)
+	}
+
+	// Find first matching element
+	for _, item := range arrayData {
+		mapItem, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract field value using dot notation if needed
+		fieldValue, err := v.extractFieldValue(mapItem, field)
+		if err != nil {
+			continue
+		}
+
+		// Check condition
+		matched := false
+		if operator == "" {
+			// Boolean check - field exists and is truthy
+			matched = v.isTruthy(fieldValue)
+		} else {
+			matched = v.compareFieldValue(fieldValue, operator, expectedValue)
+		}
+
+		if matched {
+			return item, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no matching element found in array for filter: %s", filter)
+}
+
+// extractFieldValue extracts a field value, supporting dot notation
+func (v *Validator) extractFieldValue(obj map[string]interface{}, field string) (interface{}, error) {
+	if !strings.Contains(field, ".") {
+		if val, exists := obj[field]; exists {
+			return val, nil
+		}
+		return nil, fmt.Errorf("field not found: %s", field)
+	}
+
+	// Handle nested fields
+	parts := strings.Split(field, ".")
+	current := interface{}(obj)
+	for _, part := range parts {
+		if mapData, ok := current.(map[string]interface{}); ok {
+			if val, exists := mapData[part]; exists {
+				current = val
+			} else {
+				return nil, fmt.Errorf("field not found: %s", part)
+			}
+		} else {
+			return nil, fmt.Errorf("cannot access field on non-object")
+		}
+	}
+	return current, nil
+}
+
+// isTruthy checks if a value is truthy
+func (v *Validator) isTruthy(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+
+	switch val := value.(type) {
+	case bool:
+		return val
+	case string:
+		return val != ""
+	case int, int8, int16, int32, int64:
+		return val != 0
+	case float32, float64:
+		return val != 0.0
+	default:
+		return true
+	}
+}
+
+// compareFieldValue compares a field value against expected value using operator
+func (v *Validator) compareFieldValue(fieldValue interface{}, operator, expectedValue string) bool {
+	// Try numeric comparison first
+	fieldFloat, fieldOk := v.toFloat64(fieldValue)
+	expectedFloat, expectedOk := v.toFloat64(expectedValue)
+
+	if fieldOk && expectedOk {
+		switch operator {
+		case "==", "=":
+			return fieldFloat == expectedFloat
+		case "!=":
+			return fieldFloat != expectedFloat
+		case ">":
+			return fieldFloat > expectedFloat
+		case "<":
+			return fieldFloat < expectedFloat
+		case ">=":
+			return fieldFloat >= expectedFloat
+		case "<=":
+			return fieldFloat <= expectedFloat
+		}
+	}
+
+	// Try boolean comparison
+	if fieldBool, ok := fieldValue.(bool); ok {
+		expectedBool := expectedValue == "true"
+		switch operator {
+		case "==", "=":
+			return fieldBool == expectedBool
+		case "!=":
+			return fieldBool != expectedBool
+		}
+	}
+
+	// String comparison
+	fieldStr := fmt.Sprintf("%v", fieldValue)
+	switch operator {
+	case "==", "=":
+		return fieldStr == expectedValue
+	case "!=":
+		return fieldStr != expectedValue
+	case ">":
+		return fieldStr > expectedValue
+	case "<":
+		return fieldStr < expectedValue
+	case ">=":
+		return fieldStr >= expectedValue
+	case "<=":
+		return fieldStr <= expectedValue
+	}
+
+	return false
+}
+
+// sliceArray returns a slice of array
+func (v *Validator) sliceArray(arrayData []interface{}, sliceExpr string) (interface{}, error) {
+	parts := strings.Split(sliceExpr, ":")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid slice expression: %s", sliceExpr)
+	}
+
+	start := 0
+	end := len(arrayData)
+
+	if parts[0] != "" {
+		var err error
+		start, err = strconv.Atoi(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid slice start: %s", parts[0])
+		}
+		if start < 0 {
+			start = len(arrayData) + start
+		}
+	}
+
+	if parts[1] != "" {
+		var err error
+		end, err = strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid slice end: %s", parts[1])
+		}
+		if end < 0 {
+			end = len(arrayData) + end
+		}
+	}
+
+	if start < 0 || end > len(arrayData) || start > end {
+		return nil, fmt.Errorf("slice out of bounds: %d:%d (length: %d)", start, end, len(arrayData))
+	}
+
+	return arrayData[start:end], nil
 }
 
 func (v *Validator) matchesType(value interface{}, expectedType string) bool {

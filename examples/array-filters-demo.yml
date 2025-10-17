@@ -1,0 +1,178 @@
+name: "Array Filters Demo"
+version: "1.0"
+description: "Demonstration of advanced JSONPath array filtering capabilities"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Get All Posts"
+    description: "Retrieve all posts to demonstrate filtering"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+      - json: "$.length"
+        greater: 0
+    capture:
+      all_posts: "$"
+
+  - name: "Filter Post by ID"
+    description: "Find a specific post by ID using filter instead of hardcoded index"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Instead of $[0], use filter to find post with id=5
+      - json: "$[?(@.id == 5)].id"
+        equals: 5
+      - json: "$[?(@.id == 5)].userId"
+        equals: 1
+    capture:
+      specific_post_id: "$[?(@.id == 5)].id"
+      specific_post_userId: "$[?(@.id == 5)].userId"
+
+  - name: "Filter by User ID"
+    description: "Find first post by a specific user"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Find first post where userId = 2
+      - json: "$[?(@.userId == 2)].id"
+        type: "number"
+    capture:
+      user_post: "$[?(@.userId == 2)]"
+      user_post_id: "$[?(@.userId == 2)].id"
+
+  - name: "Get Last Post"
+    description: "Get the last post using 'last' selector"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Get last post without knowing the exact length
+      - json: "$[last].id"
+        type: "number"
+      - json: "$[-1].title"
+        type: "string"
+    capture:
+      last_post: "$[last]"
+
+  - name: "Get Post Slice"
+    description: "Get a slice of posts"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Get first 3 posts
+      - json: "$[0:3]"
+        type: "array"
+    capture:
+      first_three_posts: "$[0:3]"
+
+  - name: "Get All Comments for a Post"
+    description: "Get comments and filter them"
+    request:
+      method: "GET"
+      url: "{{base_url}}/comments"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Filter comments by postId
+      - json: "$[?(@.postId == 1)].postId"
+        equals: 1
+    capture:
+      comment_email: "$[?(@.postId == 1)].email"
+
+  - name: "Get All Users"
+    description: "Get users and demonstrate various filters"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Get all users with wildcard
+      - json: "$[*]"
+        type: "array"
+      # Find user by name
+      - json: "$[?(@.username == \"Bret\")].username"
+        equals: "Bret"
+      # Find user by id
+      - json: "$[?(@.id == 2)].id"
+        equals: 2
+    capture:
+      bret_username: "$[?(@.username == \"Bret\")].username"
+      user2_id: "$[?(@.id == 2)].id"
+
+  - name: "Get User with Nested Field Filter"
+    description: "Filter by nested object field"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Find user by nested field (address.city) and get their name
+      - json: "$[?(@.id == 1)].name"
+        type: "string"
+      # Access nested field after filtering
+      - json: "$[?(@.id == 1)].address.geo.lat"
+        type: "string"
+    capture:
+      user_name: "$[?(@.id == 1)].name"
+      user_lat: "$[?(@.id == 1)].address.geo.lat"
+
+  - name: "Get All Posts with Wildcard"
+    description: "Demonstrate wildcard selector to get all array elements"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$[*]"
+        type: "array"
+      - json: "$.length"
+        greater: 50
+    capture:
+      posts_count: "$.length"
+
+  - name: "Verify Captured Variables"
+    description: "Use captured variables in subsequent request"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/5"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 5
+      - json: "$.userId"
+        type: "number"
+      - json: "$.title"
+        type: "string"
+

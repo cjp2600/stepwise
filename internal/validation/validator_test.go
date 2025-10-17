@@ -357,5 +357,280 @@ func TestValidateBase64JSONDecode(t *testing.T) {
 	}
 }
 
+func TestExtractJSONValueWithFilters(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	// Test data with array of users
+	data := map[string]interface{}{
+		"users": []interface{}{
+			map[string]interface{}{"id": 1, "name": "Alice", "age": 25, "active": true},
+			map[string]interface{}{"id": 2, "name": "Bob", "age": 30, "active": false},
+			map[string]interface{}{"id": 3, "name": "Charlie", "age": 35, "active": true},
+			map[string]interface{}{"id": 4, "name": "Diana", "age": 28, "active": true},
+		},
+		"products": []interface{}{
+			map[string]interface{}{"id": 101, "price": 50, "name": "Widget"},
+			map[string]interface{}{"id": 102, "price": 150, "name": "Gadget"},
+			map[string]interface{}{"id": 103, "price": 75, "name": "Tool"},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		path     string
+		expected interface{}
+		wantErr  bool
+	}{
+		// Filter by string equality
+		{
+			name:     "Filter by name",
+			path:     `$.users[?(@.name == "Bob")]`,
+			expected: map[string]interface{}{"id": float64(2), "name": "Bob", "age": float64(30), "active": false},
+			wantErr:  false,
+		},
+		// Filter by numeric equality
+		{
+			name:     "Filter by id",
+			path:     `$.users[?(@.id == 3)]`,
+			expected: map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
+			wantErr:  false,
+		},
+		// Filter by boolean field
+		{
+			name:     "Filter by active boolean",
+			path:     `$.users[?(@.active)]`,
+			expected: map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
+			wantErr:  false,
+		},
+		// Filter by boolean equality
+		{
+			name:     "Filter by active == true",
+			path:     `$.users[?(@.active == true)]`,
+			expected: map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
+			wantErr:  false,
+		},
+		// Filter by greater than
+		{
+			name:     "Filter by age > 30",
+			path:     `$.users[?(@.age > 30)]`,
+			expected: map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
+			wantErr:  false,
+		},
+		// Filter by less than
+		{
+			name:     "Filter by price < 100",
+			path:     `$.products[?(@.price < 100)]`,
+			expected: map[string]interface{}{"id": float64(101), "price": float64(50), "name": "Widget"},
+			wantErr:  false,
+		},
+		// Filter by greater or equal
+		{
+			name:     "Filter by price >= 75",
+			path:     `$.products[?(@.price >= 75)]`,
+			expected: map[string]interface{}{"id": float64(102), "price": float64(150), "name": "Gadget"},
+			wantErr:  false,
+		},
+		// Filter by not equal
+		{
+			name:     "Filter by name != Alice",
+			path:     `$.users[?(@.name != "Alice")]`,
+			expected: map[string]interface{}{"id": float64(2), "name": "Bob", "age": float64(30), "active": false},
+			wantErr:  false,
+		},
+		// Last element
+		{
+			name:     "Get last user",
+			path:     `$.users[last]`,
+			expected: map[string]interface{}{"id": float64(4), "name": "Diana", "age": float64(28), "active": true},
+			wantErr:  false,
+		},
+		// Negative index
+		{
+			name:     "Get last user with -1",
+			path:     `$.users[-1]`,
+			expected: map[string]interface{}{"id": float64(4), "name": "Diana", "age": float64(28), "active": true},
+			wantErr:  false,
+		},
+		// Array slice
+		{
+			name: "Get first 2 users",
+			path: `$.users[0:2]`,
+			expected: []interface{}{
+				map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
+				map[string]interface{}{"id": float64(2), "name": "Bob", "age": float64(30), "active": false},
+			},
+			wantErr: false,
+		},
+		// Wildcard - get all elements
+		{
+			name: "Get all users with wildcard",
+			path: `$.users[*]`,
+			expected: []interface{}{
+				map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
+				map[string]interface{}{"id": float64(2), "name": "Bob", "age": float64(30), "active": false},
+				map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
+				map[string]interface{}{"id": float64(4), "name": "Diana", "age": float64(28), "active": true},
+			},
+			wantErr: false,
+		},
+		// Filter not found
+		{
+			name:    "Filter with no match",
+			path:    `$.users[?(@.name == "Unknown")]`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Convert data to JSON and back to simulate JSON unmarshaling
+			jsonBytes, _ := json.Marshal(data)
+			var jsonData interface{}
+			json.Unmarshal(jsonBytes, &jsonData)
+
+			value, err := validator.extractJSONValue(jsonData, tt.path)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Compare results
+			expectedJSON, _ := json.Marshal(tt.expected)
+			actualJSON, _ := json.Marshal(value)
+
+			if string(expectedJSON) != string(actualJSON) {
+				t.Errorf("Expected %s, got %s", string(expectedJSON), string(actualJSON))
+			}
+		})
+	}
+}
+
+func TestExtractJSONValueWithNestedFilters(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	// Test data with nested structures
+	data := map[string]interface{}{
+		"orders": []interface{}{
+			map[string]interface{}{
+				"id": 1,
+				"customer": map[string]interface{}{
+					"name": "Alice",
+					"vip":  true,
+				},
+				"total": 150,
+			},
+			map[string]interface{}{
+				"id": 2,
+				"customer": map[string]interface{}{
+					"name": "Bob",
+					"vip":  false,
+				},
+				"total": 75,
+			},
+			map[string]interface{}{
+				"id": 3,
+				"customer": map[string]interface{}{
+					"name": "Charlie",
+					"vip":  true,
+				},
+				"total": 200,
+			},
+		},
+	}
+
+	// Convert to JSON and back
+	jsonBytes, _ := json.Marshal(data)
+	var jsonData interface{}
+	json.Unmarshal(jsonBytes, &jsonData)
+
+	// Test filter with nested field
+	value, err := validator.extractJSONValue(jsonData, `$.orders[?(@.customer.vip == true)]`)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	// Should return first VIP customer order
+	orderMap, ok := value.(map[string]interface{})
+	if !ok {
+		t.Errorf("Expected map, got %T", value)
+		return
+	}
+
+	if orderMap["id"].(float64) != 1 {
+		t.Errorf("Expected order id 1, got %v", orderMap["id"])
+	}
+
+	// Test filter with nested field and greater than
+	value, err = validator.extractJSONValue(jsonData, `$.orders[?(@.total > 100)]`)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	orderMap, ok = value.(map[string]interface{})
+	if !ok {
+		t.Errorf("Expected map, got %T", value)
+		return
+	}
+
+	if orderMap["id"].(float64) != 1 {
+		t.Errorf("Expected order id 1, got %v", orderMap["id"])
+	}
+}
+
+func TestExtractJSONValueFilterAndAccess(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	// Test data
+	data := map[string]interface{}{
+		"users": []interface{}{
+			map[string]interface{}{
+				"id":   1,
+				"name": "Alice",
+				"address": map[string]interface{}{
+					"city":    "New York",
+					"zipcode": "10001",
+				},
+			},
+			map[string]interface{}{
+				"id":   2,
+				"name": "Bob",
+				"address": map[string]interface{}{
+					"city":    "Los Angeles",
+					"zipcode": "90001",
+				},
+			},
+		},
+	}
+
+	// Convert to JSON and back
+	jsonBytes, _ := json.Marshal(data)
+	var jsonData interface{}
+	json.Unmarshal(jsonBytes, &jsonData)
+
+	// Test filter and then access nested field
+	value, err := validator.extractJSONValue(jsonData, `$.users[?(@.name == "Bob")].address.city`)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	if value != "Los Angeles" {
+		t.Errorf("Expected 'Los Angeles', got %v", value)
+	}
+}
+
 func boolPtr(b bool) *bool { return &b }
 func intPtr(i int) *int    { return &i }
