@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -170,21 +171,50 @@ func (a *App) handleRun(args []string) error {
 			return fmt.Errorf("failed to load workflow: %w", err)
 		}
 
-		if !*verbose {
-			spinner.UpdateMessage("Executing workflow...")
-		}
 		executor := workflow.NewExecutor(a.config, a.logger)
+		
+		// Setup live progress reporter if not in verbose mode
+		var progressReporter *LiveProgressReporter
+		if !*verbose {
+			spinner.Stop()
+			if len(wf.Steps) > 0 {
+				progressReporter = NewLiveProgressReporter(a.colors, len(wf.Steps))
+				progressReporter.Start()
+				
+				// Set progress callback
+				executor.SetProgressCallback(func(stepName string, stepIndex int, totalSteps int, status string, duration time.Duration, validationsPassed int, validationsTotal int, err error) {
+					update := ProgressUpdate{
+						StepName:          stepName,
+						StepIndex:         stepIndex,
+						TotalSteps:        totalSteps,
+						Status:            status,
+						Duration:          duration,
+						ValidationCount:   validationsTotal,
+						ValidationsPassed: validationsPassed,
+					}
+					if err != nil {
+						update.Error = err.Error()
+					}
+					progressReporter.Update(update)
+				})
+			}
+		}
+		
 		results, err := executor.Execute(wf)
+		
+		// Stop and complete progress reporter
+		if progressReporter != nil {
+			progressReporter.Complete()
+		}
+		
 		if err != nil {
 			if !*verbose {
-				spinner.Error("Workflow execution failed")
+				fmt.Printf("✗ Workflow execution failed: %v\n", err)
 			}
 			return fmt.Errorf("workflow execution failed: %w", err)
 		}
 
-		if !*verbose {
-			spinner.Success("Workflow completed successfully")
-		}
+		// Workflow completion is now shown by progress reporter
 		hasFailures := a.printResults(results)
 		if hasFailures {
 			return fmt.Errorf("workflow execution completed with failures")

@@ -134,13 +134,22 @@ type StepWithVars struct {
 }
 
 // Executor executes workflows
+// ProgressCallback is called on each step progress update
+type ProgressCallback func(stepName string, stepIndex int, totalSteps int, status string, duration time.Duration, validationsPassed int, validationsTotal int, err error)
+
 type Executor struct {
-	config     *config.Config
-	logger     *logger.Logger
-	httpClient *httpclient.Client
-	grpcClient *grpcclient.Client
-	validator  *validation.Validator
-	varManager *variables.Manager
+	config           *config.Config
+	logger           *logger.Logger
+	httpClient       *httpclient.Client
+	grpcClient       *grpcclient.Client
+	validator        *validation.Validator
+	varManager       *variables.Manager
+	progressCallback ProgressCallback
+}
+
+// SetProgressCallback sets the progress callback function
+func (e *Executor) SetProgressCallback(callback ProgressCallback) {
+	e.progressCallback = callback
 }
 
 // NewExecutor creates a new workflow executor
@@ -263,8 +272,9 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	e.logger.Info("[DEBUG] Available componentMap keys", "keys", componentKeys)
 
 	var allResults []TestResult
+	totalSteps := len(wf.Steps)
 
-	for _, step := range wf.Steps {
+	for stepIndex, step := range wf.Steps {
 		if step.Use != "" {
 			if comp, ok := componentMap[step.Use]; ok {
 				mergedStep := comp.Step
@@ -287,6 +297,12 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 					Status:       "pending",
 					CapturedData: make(map[string]interface{}),
 				}
+				
+				// Notify progress callback that step is starting
+				if e.progressCallback != nil {
+					e.progressCallback(mergedStep.Name, stepIndex+1, totalSteps, "running", 0, 0, 0, nil)
+				}
+				
 				if err := e.executeStepWithRepeat(&mergedStep, result); err != nil {
 					result.Status = "failed"
 					result.Error = err.Error()
@@ -294,6 +310,19 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				} else {
 					result.Status = "passed"
 				}
+				
+				// Notify progress callback of completion
+				if e.progressCallback != nil {
+					validationsPassed := 0
+					validationsTotal := len(result.Validations)
+					for _, v := range result.Validations {
+						if v.Passed {
+							validationsPassed++
+						}
+					}
+					e.progressCallback(mergedStep.Name, stepIndex+1, totalSteps, result.Status, result.Duration, validationsPassed, validationsTotal, nil)
+				}
+				
 				allResults = append(allResults, *result)
 				vars := e.varManager.GetAll()
 				e.logger.Info("[DEBUG] Variables after component step", "step", mergedStep.Name, "vars", vars)
@@ -322,6 +351,12 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				continue
 			}
 		}
+		
+		// Notify progress callback that step is starting
+		if e.progressCallback != nil {
+			e.progressCallback(step.Name, stepIndex+1, totalSteps, "running", 0, 0, 0, nil)
+		}
+		
 		if err := e.executeStepWithRepeat(&step, result); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
@@ -329,6 +364,23 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 		} else {
 			result.Status = "passed"
 		}
+		
+		// Notify progress callback of completion
+		if e.progressCallback != nil {
+			validationsPassed := 0
+			validationsTotal := len(result.Validations)
+			for _, v := range result.Validations {
+				if v.Passed {
+					validationsPassed++
+				}
+			}
+			var resultErr error
+			if result.Status == "failed" && result.Error != "" {
+				resultErr = fmt.Errorf("%s", result.Error)
+			}
+			e.progressCallback(step.Name, stepIndex+1, totalSteps, result.Status, result.Duration, validationsPassed, validationsTotal, resultErr)
+		}
+		
 		allResults = append(allResults, *result)
 		vars := e.varManager.GetAll()
 		e.logger.Info("[DEBUG] Variables after step", "step", step.Name, "vars", vars)

@@ -1,0 +1,102 @@
+name: "Live Progress Demo"
+version: "1.0"
+description: "Demonstration of live progress reporting with multiple steps"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Step 1: Get Post 1"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+
+  - name: "Step 2: Get Post 2"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/2"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 2
+
+  - name: "Step 3: Get Post 3"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/3"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 3
+
+  - name: "Step 4: Get User 1"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+
+  - name: "Step 5: Get User 2"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/2"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 2
+
+  - name: "Step 6: Get Comments"
+    request:
+      method: "GET"
+      url: "{{base_url}}/comments?postId=1"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+
+  - name: "Step 7: Get Albums"
+    request:
+      method: "GET"
+      url: "{{base_url}}/albums?userId=1"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+
+  - name: "Step 8: Get Photos"
+    request:
+      method: "GET"
+      url: "{{base_url}}/photos?albumId=1"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+      - json: "$.length"
+        greater: 10
+
+  - name: "Step 9: Get Todos"
+    request:
+      method: "GET"
+      url: "{{base_url}}/todos?userId=1"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+
+  - name: "Step 10: Final Check"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+      - json: "$.length"
+        greater: 50
+
