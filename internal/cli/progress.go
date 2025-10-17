@@ -9,13 +9,13 @@ import (
 
 // ProgressUpdate represents a single progress update
 type ProgressUpdate struct {
-	StepName     string
-	StepIndex    int
-	TotalSteps   int
-	Status       string // "running", "passed", "failed"
-	Duration     time.Duration
-	Error        string
-	ValidationCount int
+	StepName          string
+	StepIndex         int
+	TotalSteps        int
+	Status            string // "running", "passed", "failed"
+	Duration          time.Duration
+	Error             string
+	ValidationCount   int
 	ValidationsPassed int
 }
 
@@ -53,10 +53,11 @@ func (p *LiveProgressReporter) Start() {
 	p.running = true
 	p.mu.Unlock()
 
-	// Always use simple text mode - print header
-	fmt.Println("\n" + strings.Repeat("=", 50))
-	fmt.Println("Starting Workflow Execution")
-	fmt.Println(strings.Repeat("=", 50))
+	// Print colored header
+	fmt.Println()
+	fmt.Println(p.colors.Cyan(strings.Repeat("=", 50)))
+	fmt.Println(p.colors.Bold(p.colors.Cyan("Starting Workflow Execution")))
+	fmt.Println(p.colors.Cyan(strings.Repeat("=", 50)))
 }
 
 // Stop stops the live progress reporter
@@ -71,19 +72,28 @@ func (p *LiveProgressReporter) Update(update ProgressUpdate) {
 	// Always use simple text mode for now (ANSI interactive mode has issues in many terminals)
 	// TODO: Add proper terminal capability detection
 	if update.Status == "running" {
-		fmt.Printf("[%d/%d] Running: %s...\n", update.StepIndex, update.TotalSteps, update.StepName)
+		fmt.Printf("%s %s %s\n", 
+			p.colors.Dim(fmt.Sprintf("[%d/%d]", update.StepIndex, update.TotalSteps)),
+			p.colors.Yellow("⟳ Running:"),
+			p.colors.Bold(update.StepName))
 	} else if update.Status == "passed" {
 		validationInfo := ""
 		if update.ValidationCount > 0 {
-			validationInfo = fmt.Sprintf(" [%d/%d validations passed]", update.ValidationsPassed, update.ValidationCount)
+			validationInfo = p.colors.Dim(fmt.Sprintf(" [%d/%d validations passed]", update.ValidationsPassed, update.ValidationCount))
 		}
-		fmt.Printf("[%d/%d] ✓ PASS: %s (%dms)%s\n", 
-			update.StepIndex, update.TotalSteps, update.StepName, 
-			update.Duration.Milliseconds(), validationInfo)
+		fmt.Printf("%s %s %s %s%s\n", 
+			p.colors.Dim(fmt.Sprintf("[%d/%d]", update.StepIndex, update.TotalSteps)),
+			p.colors.Green("✓ PASS:"),
+			p.colors.Bold(update.StepName),
+			p.colors.Dim(fmt.Sprintf("(%dms)", update.Duration.Milliseconds())),
+			validationInfo)
 	} else if update.Status == "failed" {
-		fmt.Printf("[%d/%d] ✗ FAIL: %s (%dms) - %s\n", 
-			update.StepIndex, update.TotalSteps, update.StepName, 
-			update.Duration.Milliseconds(), update.Error)
+		fmt.Printf("%s %s %s %s - %s\n", 
+			p.colors.Dim(fmt.Sprintf("[%d/%d]", update.StepIndex, update.TotalSteps)),
+			p.colors.Red("✗ FAIL:"),
+			p.colors.Bold(update.StepName),
+			p.colors.Dim(fmt.Sprintf("(%dms)", update.Duration.Milliseconds())),
+			p.colors.Red(update.Error))
 	}
 	
 	// Update internal state for summary
@@ -121,8 +131,8 @@ func (p *LiveProgressReporter) render() {
 	barWidth := 40
 	filled := int(float64(barWidth) * progress / 100)
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	
-	fmt.Printf("\n%s [%s] %.1f%%\n", 
+
+	fmt.Printf("\n%s [%s] %.1f%%\n",
 		p.colors.Bold("Progress:"),
 		p.colors.Cyan(bar),
 		progress)
@@ -156,19 +166,19 @@ func (p *LiveProgressReporter) render() {
 			if h.Status == "failed" {
 				statusIcon = p.colors.Red("✗")
 			}
-			
+
 			stepName := p.truncate(h.StepName, 45)
 			duration := fmt.Sprintf("%dms", h.Duration.Milliseconds())
-			
+
 			line := fmt.Sprintf("  %s %s %s",
 				statusIcon,
 				p.colors.Dim(stepName),
 				p.colors.Dim(fmt.Sprintf("(%s)", duration)))
-			
+
 			if h.ValidationCount > 0 {
 				line += p.colors.Dim(fmt.Sprintf(" [%d/%d validations]", h.ValidationsPassed, h.ValidationCount))
 			}
-			
+
 			fmt.Println(line)
 		}
 	}
@@ -204,16 +214,32 @@ func (p *LiveProgressReporter) Complete() {
 
 	p.running = false
 
-	// Simple text mode - print summary
+	// Print colored summary
 	elapsed := time.Since(p.startTime)
 	total := p.passed + p.failed
 	if total > 0 {
 		successRate := float64(p.passed) / float64(total) * 100
-		fmt.Println("\n" + strings.Repeat("=", 50))
-		fmt.Printf("Workflow Execution Completed in %.2fs\n", elapsed.Seconds())
-		fmt.Printf("Steps: %d total, %d passed, %d failed (%.1f%% success)\n", 
-			total, p.passed, p.failed, successRate)
-		fmt.Println(strings.Repeat("=", 50) + "\n")
+		
+		// Choose color based on success rate
+		summaryColor := p.colors.Green
+		if successRate < 100 {
+			summaryColor = p.colors.Yellow
+		}
+		if successRate < 80 {
+			summaryColor = p.colors.Red
+		}
+		
+		fmt.Println()
+		fmt.Println(p.colors.Cyan(strings.Repeat("=", 50)))
+		fmt.Printf("%s %s\n", 
+			summaryColor("✓"),
+			p.colors.Bold(fmt.Sprintf("Workflow Execution Completed in %.2fs", elapsed.Seconds())))
+		fmt.Printf("Steps: %s total, %s passed, %s failed (%s success)\n", 
+			p.colors.Bold(fmt.Sprintf("%d", total)),
+			p.colors.Green(fmt.Sprintf("%d", p.passed)),
+			p.colors.Red(fmt.Sprintf("%d", p.failed)),
+			summaryColor(fmt.Sprintf("%.1f%%", successRate)))
+		fmt.Println(p.colors.Cyan(strings.Repeat("=", 50)))
+		fmt.Println()
 	}
 }
-
