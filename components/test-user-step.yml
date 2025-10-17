@@ -1,0 +1,24 @@
+name: "Get User Step"
+version: "1.0"
+description: "Reusable step component for getting a user"
+type: "step"
+
+variables:
+  user_id: "1"
+  api_base: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Get User"
+    request:
+      method: "GET"
+      url: "{{api_base}}/users/{{user_id}}"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        type: "number"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email"
+

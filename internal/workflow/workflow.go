@@ -66,8 +66,9 @@ type Step struct {
 	RetryDelay   string                      `yaml:"retry_delay" json:"retry_delay"`
 	Timeout      string                      `yaml:"timeout" json:"timeout"`
 	Repeat       *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
-	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"`   // Новое поле для задержки
-	Print        string                      `yaml:"print,omitempty" json:"print,omitempty"` // Новое поле для вывода
+	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"`     // Новое поле для задержки
+	Print        string                      `yaml:"print,omitempty" json:"print,omitempty"`   // Новое поле для вывода
+	Variables    map[string]interface{}      `yaml:"variables,omitempty" json:"variables,omitempty"` // Переменные для переопределения в use
 }
 
 // RepeatConfig represents configuration for repeating a step
@@ -291,7 +292,13 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 					mergedStep.Description = step.Description
 				}
 				e.logger.Info("[COMPONENT] Executing use step", "use", step.Use, "step", mergedStep.Name)
+				// Initialize component variables first
 				e.initializeVariables(comp.Variables)
+				// Then apply step-level variable overrides
+				if len(step.Variables) > 0 {
+					e.logger.Debug("[COMPONENT] Applying step-level variable overrides", "variables", step.Variables)
+					e.initializeVariables(step.Variables)
+				}
 				result := &TestResult{
 					Name:         mergedStep.Name,
 					Status:       "pending",

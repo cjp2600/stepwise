@@ -293,6 +293,23 @@ imports:
           X-Custom-Header: "{{custom_value}}"
 
 steps:
+  # Override component variables at step level
+  - name: "Test User 1"
+    use: "User Login"
+    variables:
+      username: "user1"
+      password: "pass1"
+    validate:
+      - status: 200
+
+  - name: "Test User 2"
+    use: "User Login"
+    variables:
+      username: "user2"
+      password: "pass2"
+    validate:
+      - status: 200
+
   - name: "Test Protected Endpoint"
     request:
       method: "GET"

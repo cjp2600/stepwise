@@ -191,6 +191,47 @@ imports:
       timeout: "10s"
 ```
 
+### Step-Level Variable Overrides
+
+You can also override component variables at the step level when using the `use` directive. This allows you to reuse the same component multiple times with different variable values:
+
+```yaml
+imports:
+  - path: "components/get-user"
+    alias: "get-user"
+
+steps:
+  # Use component with default variables
+  - name: "Get User 1"
+    use: 'get-user'
+    validate:
+      - status: 200
+  
+  # Override variables for this specific step
+  - name: "Get User 5"
+    use: 'get-user'
+    variables:
+      user_id: "5"
+    validate:
+      - status: 200
+  
+  # Another override with different values
+  - name: "Get User 10"
+    use: 'get-user'
+    variables:
+      user_id: "10"
+      timeout: "10s"
+    validate:
+      - status: 200
+```
+
+**Priority Order:**
+1. Component default variables (lowest priority)
+2. Import-level variable overrides
+3. Step-level variable overrides (highest priority)
+
+This means step-level variables will override both component defaults and import-level variables.
+
 ### Request Overrides
 
 You can override specific parts of requests:

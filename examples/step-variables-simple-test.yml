@@ -1,0 +1,45 @@
+name: "Step Variables Override - Simple Test"
+version: "1.0"
+description: "Test step-level variable overrides"
+
+imports:
+  - path: "components/test-user-step"
+    alias: "get-user"
+
+steps:
+  - name: "[STEP 1] Get User 1 (default)"
+    use: 'get-user'
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+
+  - name: "[STEP 2] Get User 5 (override with step variables)"
+    use: 'get-user'
+    variables:
+      user_id: "5"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 5
+      - json: "$.name"
+        type: "string"
+
+  - name: "[STEP 3] Get User 10 (another override)"
+    use: 'get-user'
+    variables:
+      user_id: "10"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 10
+
+  - name: "[STEP 4] Verify last captured user name is from user 10"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/10"
+    validate:
+      - status: 200
+      - json: "$.name"
+        equals: "{{user_name}}"
+
