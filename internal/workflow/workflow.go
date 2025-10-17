@@ -1111,7 +1111,8 @@ func (e *Executor) captureValues(response *httpclient.Response, captures map[str
 	}
 
 	for captureKey, jsonPath := range captures {
-		value, err := e.extractJSONValue(jsonData, jsonPath)
+		// Use validator's ExtractJSONValue which supports advanced JSONPath with filters
+		value, err := e.validator.ExtractJSONValue(jsonData, jsonPath)
 		if err != nil {
 			e.logger.Warn("Failed to capture value", "key", captureKey, "path", jsonPath, "error", err)
 			continue
@@ -1123,105 +1124,6 @@ func (e *Executor) captureValues(response *httpclient.Response, captures map[str
 	}
 
 	return nil
-}
-
-// extractJSONValue extracts a value from JSON data using JSONPath-like syntax
-func (e *Executor) extractJSONValue(data interface{}, path string) (interface{}, error) {
-	// Substitute variables in the path first
-	substitutedPath, err := e.varManager.Substitute(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to substitute variables in path '%s': %w", path, err)
-	}
-
-	// Поддержка сложных путей с массивами: $.widgets[0].widget
-	if substitutedPath == "$" {
-		return data, nil
-	}
-
-	if strings.HasPrefix(substitutedPath, "$.") {
-		pathExpr := strings.TrimPrefix(substitutedPath, "$.")
-		// Разбиваем путь на части с учётом индексов
-		var parts []string
-		var buf strings.Builder
-		inBracket := false
-		for _, r := range pathExpr {
-			if r == '.' && !inBracket {
-				parts = append(parts, buf.String())
-				buf.Reset()
-			} else {
-				if r == '[' {
-					inBracket = true
-				}
-				if r == ']' {
-					inBracket = false
-				}
-				buf.WriteRune(r)
-			}
-		}
-		if buf.Len() > 0 {
-			parts = append(parts, buf.String())
-		}
-		current := data
-		for _, part := range parts {
-			// Массив с индексом: key[index]
-			if strings.Contains(part, "[") && strings.HasSuffix(part, "]") {
-				openBracket := strings.Index(part, "[")
-				closeBracket := strings.Index(part, "]")
-				key := part[:openBracket]
-				indexStr := part[openBracket+1 : closeBracket]
-				if mapData, ok := current.(map[string]interface{}); ok {
-					if array, exists := mapData[key]; exists {
-						if arrayData, ok := array.([]interface{}); ok {
-							index, err := strconv.Atoi(indexStr)
-							if err != nil {
-								return nil, fmt.Errorf("invalid array index: %s", indexStr)
-							}
-							if index >= 0 && index < len(arrayData) {
-								current = arrayData[index]
-							} else {
-								return nil, fmt.Errorf("array index out of bounds: %d", index)
-							}
-						} else {
-							return nil, fmt.Errorf("key %s is not an array", key)
-						}
-					} else {
-						return nil, fmt.Errorf("key not found: %s", key)
-					}
-				} else {
-					return nil, fmt.Errorf("cannot access array on non-object")
-				}
-			} else {
-				// Обычный ключ
-				if mapData, ok := current.(map[string]interface{}); ok {
-					if value, exists := mapData[part]; exists {
-						current = value
-					} else {
-						return nil, fmt.Errorf("key not found: %s", part)
-					}
-				} else {
-					return nil, fmt.Errorf("cannot access key on non-object")
-				}
-			}
-		}
-		return current, nil
-	}
-
-	if strings.HasPrefix(substitutedPath, "$[") && strings.HasSuffix(substitutedPath, "]") {
-		indexStr := strings.TrimPrefix(strings.TrimSuffix(substitutedPath, "]"), "$[")
-		index, err := strconv.Atoi(indexStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid array index: %s", indexStr)
-		}
-		if arrayData, ok := data.([]interface{}); ok {
-			if index >= 0 && index < len(arrayData) {
-				return arrayData[index], nil
-			}
-			return nil, fmt.Errorf("array index out of bounds: %d", index)
-		}
-		return nil, fmt.Errorf("array index out of bounds: %d", index)
-	}
-
-	return nil, fmt.Errorf("unsupported JSON path: %s", substitutedPath)
 }
 
 // parseTimeout parses a timeout string into duration

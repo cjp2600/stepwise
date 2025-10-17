@@ -351,7 +351,7 @@ validate:
 
 ### Advanced Array Filters
 
-Find array elements by condition instead of hardcoded index:
+Find array elements by condition instead of hardcoded index. JSONPath filters work in both `validate` and `capture`:
 
 ```yaml
 validate:
@@ -370,6 +370,13 @@ validate:
   # Get array slice
   - json: "$[0:3]"
     type: "array"
+
+capture:
+  # Capture supports the same advanced JSONPath filters
+  user_email: "$[?(@.name == \"Alice\")].email"
+  product_name: "$[?(@.price > 100)].name"
+  last_id: "$[last].id"
+  first_three: "$[0:3]"
 ```
 
 See [Array Filters Documentation](docs/ARRAY_FILTERS.md) for complete guide.

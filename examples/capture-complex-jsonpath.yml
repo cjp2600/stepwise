@@ -1,0 +1,111 @@
+name: "Complex JSONPath Capture Demo"
+version: "1.0"
+description: "Demonstrates capture with complex JSONPath filters for nested structures"
+
+steps:
+  - name: "Mock API with Complex Structure"
+    description: "Simulates an API response with multiple sections and nested data"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+    capture:
+      # Capture using simple filter - get specific post by id
+      post_with_id_5_title: "$[?(@.id == 5)].title"
+      post_with_id_5_body: "$[?(@.id == 5)].body"
+      
+      # Capture using filter with userId
+      first_post_by_user_2: "$[?(@.userId == 2)].id"
+      
+      # Capture the entire filtered object
+      complete_post_5: "$[?(@.id == 5)]"
+
+  - name: "Get Users and Filter by Nested Properties"
+    description: "Demonstrates filtering by nested object properties"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$[?(@.id == 1)].name"
+        type: "string"
+    capture:
+      # Capture nested field after filter
+      user_1_name: "$[?(@.id == 1)].name"
+      user_1_email: "$[?(@.id == 1)].email"
+      user_1_city: "$[?(@.id == 1)].address.city"
+      user_1_lat: "$[?(@.id == 1)].address.geo.lat"
+      
+      # Capture different user
+      user_2_username: "$[?(@.id == 2)].username"
+
+  - name: "Use Captured Variables"
+    description: "Demonstrates using captured variables in subsequent requests"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts/5"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.title"
+        type: "string"
+    show_response: false
+
+  - name: "Display Captured Values"
+    description: "Show what was captured"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts/1"
+      headers:
+        Accept: "application/json"
+        X-Captured-Title: "{{post_with_id_5_title}}"
+        X-Captured-User-Name: "{{user_1_name}}"
+        X-Captured-City: "{{user_1_city}}"
+    validate:
+      - status: 200
+
+  - name: "Complex Filter Example"
+    description: "Demonstrates more complex filtering scenarios"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      # Filter with greater than
+      - json: "$[?(@.id > 95)].id"
+        type: "number"
+    capture:
+      # Capture post with id greater than 95
+      high_id_post_title: "$[?(@.id > 95)].title"
+      
+      # Capture specific userId posts
+      user_10_first_post: "$[?(@.userId == 10)].id"
+      
+      # Get last post
+      last_post_id: "$[last].id"
+      
+      # Get first 3 posts
+      first_three: "$[0:3]"
+
+  - name: "Verify Complex Captures"
+    description: "Verify all complex captures worked correctly"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts/1"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+

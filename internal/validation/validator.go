@@ -65,6 +65,11 @@ func (v *Validator) SetVariableManager(varManager *variables.Manager) {
 	v.varManager = varManager
 }
 
+// ExtractJSONValue extracts a value from JSON data using JSONPath syntax with support for filters
+func (v *Validator) ExtractJSONValue(data interface{}, path string) (interface{}, error) {
+	return v.extractJSONValue(data, path)
+}
+
 // Validate validates a response against validation rules
 func (v *Validator) Validate(response *http.Response, rules []ValidationRule) ([]ValidationResult, error) {
 	var results []ValidationResult
