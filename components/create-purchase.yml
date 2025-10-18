@@ -1,0 +1,27 @@
+name: "Create Purchase Component"
+version: "1.0"
+description: "Reusable component for creating a purchase"
+type: "step"
+
+variables:
+  api_url: "https://jsonplaceholder.typicode.com"
+  amount: "100"
+
+steps:
+  - name: "Create Purchase"
+    request:
+      method: "POST"
+      url: "{{api_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+      body:
+        title: "Purchase"
+        body: "Purchase amount: {{amount}}"
+        userId: 1
+    validate:
+      - status: 201
+      - json: "$.id"
+        type: "number"
+    capture:
+      purchase_id: "$.id"
+

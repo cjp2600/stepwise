@@ -1,0 +1,41 @@
+name: "Fail-Fast with Repeat Demo"
+version: "1.0"
+description: "Test fail-fast mode with repeat iterations"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "[STEP 1] ✓ Normal step should pass"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+    validate:
+      - status: 200
+
+  - name: "[STEP 2] Create posts - iteration 3 will fail"
+    request:
+      method: "POST"
+      url: "{{base_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+      body:
+        title: "Post {{iteration}}"
+        body: "Content {{iteration}}"
+        userId: "{{iteration}}"
+    validate:
+      - status: 201
+      - json: "$.id"
+        equals: 999  # This will fail on every iteration
+    repeat:
+      count: 5
+      delay: "200ms"
+      parallel: false
+
+  - name: "[STEP 3] ⚠️ This should NOT run in fail-fast mode"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/10"
+    validate:
+      - status: 200
+

@@ -1,0 +1,45 @@
+name: "Fail-Fast Mode Demo (Working)"
+version: "1.0"
+description: "Demonstrates fail-fast mode with httpbin"
+
+variables:
+  base_url: "http://httpbin.org"
+
+steps:
+  - name: "[STEP 1] ✓ This should PASS"
+    request:
+      method: "GET"
+      url: "{{base_url}}/status/200"
+    validate:
+      - status: 200
+
+  - name: "[STEP 2] ✓ This should also PASS"
+    request:
+      method: "GET"
+      url: "{{base_url}}/delay/1"
+    validate:
+      - status: 200
+
+  - name: "[STEP 3] ✗ This should FAIL (404 status)"
+    request:
+      method: "GET"
+      url: "{{base_url}}/status/404"
+    validate:
+      - status: 200  # Expecting 200 but will get 404 - FAILS
+
+  - name: "[STEP 4] ⚠️ This should NOT run with --fail-fast"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+    validate:
+      - status: 200
+
+  - name: "[STEP 5] ⚠️ This should NOT run with --fail-fast"
+    request:
+      method: "POST"
+      url: "{{base_url}}/post"
+      body:
+        test: "data"
+    validate:
+      - status: 200
+

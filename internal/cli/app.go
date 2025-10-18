@@ -122,6 +122,7 @@ func (a *App) handleRun(args []string) error {
 	parallelism := fs.IntP("parallel", "p", 1, "Number of parallel workflow executions")
 	recursive := fs.BoolP("recursive", "r", false, "Search recursively in subdirectories")
 	verbose := fs.BoolP("verbose", "v", false, "Enable verbose logging")
+	failFast := fs.BoolP("fail-fast", "f", false, "Stop execution on first test failure")
 	_ = fs.Parse(args)
 
 	// Find the first non-flag argument as the path
@@ -172,6 +173,9 @@ func (a *App) handleRun(args []string) error {
 		}
 
 		executor := workflow.NewExecutor(a.config, a.logger)
+
+		// Set fail-fast mode
+		executor.SetFailFast(*failFast)
 
 		// Setup live progress reporter if not in verbose mode
 		var progressReporter *LiveProgressReporter
@@ -298,6 +302,7 @@ func (a *App) showHelp() error {
 	fmt.Printf("  %s    %s\n", a.colors.Cyan("--parallel, -p"), "Number of parallel workflow executions (default: 1)")
 	fmt.Printf("  %s    %s\n", a.colors.Cyan("--recursive, -r"), "Search recursively in subdirectories")
 	fmt.Printf("  %s    %s\n", a.colors.Cyan("--verbose, -v"), "Enable verbose logging (shows detailed logs in real-time)")
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--fail-fast, -f"), "Stop execution on first test failure")
 
 	fmt.Printf("\n%s\n", a.colors.Bold("WORKFLOW FILES:"))
 	fmt.Printf("  Stepwise supports YAML workflow files with the following features:\n")

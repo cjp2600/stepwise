@@ -134,6 +134,18 @@ steps:
     use: "Get Request"
     validate:
       - status: 200
+
+  # Use component with repeat for load testing
+  - name: "Create 21 purchases"
+    use: "Get Request"
+    repeat:
+      count: 21
+      delay: "500ms"
+      parallel: false
+      variables:
+        amount: "{{faker.number(100, 1100)}}"
+    validate:
+      - status: 200
 ```
 
 ### Advanced Workflow Example
@@ -223,6 +235,10 @@ stepwise run workflow.yml --watch
 
 # Run with verbose logging
 stepwise run workflow.yml --verbose
+
+# Fail-fast mode (stop on first failure) - useful for CI/CD
+stepwise run workflow.yml --fail-fast
+stepwise run workflow.yml -f
 
 # Disable colors for CI
 NO_COLOR=1 stepwise run workflow.yml

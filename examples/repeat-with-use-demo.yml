@@ -1,0 +1,75 @@
+name: "Repeat with Use Demo"
+version: "1.0"
+description: "Demonstrates using repeat with components (use directive)"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+imports:
+  - path: "components/create-purchase"
+    alias: "create-purchase"
+    variables:
+      api_url: "{{base_url}}"
+
+steps:
+  # === TEST 1: Simple repeat with use ===
+  - name: "[TEST 1] Create 5 purchases using repeat with component"
+    use: 'create-purchase'
+    variables:
+      amount: "500"
+    repeat:
+      count: 5
+      delay: "500ms"
+      parallel: false
+    validate:
+      - status: 201
+
+  # === TEST 2: Repeat with dynamic variables ===
+  - name: "[TEST 2] Create purchases with dynamic amounts"
+    use: 'create-purchase'
+    repeat:
+      count: 3
+      delay: "300ms"
+      parallel: false
+      variables:
+        amount: "{{faker.number(100, 1000)}}"
+    validate:
+      - status: 201
+
+  # === TEST 3: Parallel repeat with use ===
+  - name: "[TEST 3] Create 10 purchases in parallel"
+    use: 'create-purchase'
+    variables:
+      amount: "999"
+    repeat:
+      count: 10
+      parallel: true
+    validate:
+      - status: 201
+
+  # === TEST 4: The exact scenario from user's question ===
+  - name: "[SYSTEM STEP] Create purchases to test pagination (21 total)"
+    use: 'create-purchase'
+    variables:
+      amount: "{{amount}}"
+    repeat:
+      count: 21
+      delay: "500ms"
+      parallel: false
+      variables:
+        amount: "{{faker.number(100, 1100)}}"
+    validate:
+      - status: 201
+      - json: "$.id"
+        type: "number"
+
+  # === Verify all created posts ===
+  - name: "Verify posts exist"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+    validate:
+      - status: 200
+      - json: "$"
+        type: "array"
+

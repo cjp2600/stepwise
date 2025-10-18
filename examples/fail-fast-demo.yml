@@ -1,0 +1,49 @@
+name: "Fail-Fast Mode Demo"
+version: "1.0"
+description: "Demonstrates fail-fast mode - stops at first failure"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "[STEP 1] ✓ This should pass"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+
+  - name: "[STEP 2] ✓ This should also pass"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/2"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 2
+
+  - name: "[STEP 3] ✗ This should FAIL (wrong ID)"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/3"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 999  # This will fail - actual ID is 3
+
+  - name: "[STEP 4] ⚠️ This should NOT run in fail-fast mode"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/4"
+    validate:
+      - status: 200
+
+  - name: "[STEP 5] ⚠️ This should NOT run in fail-fast mode"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/5"
+    validate:
+      - status: 200
+

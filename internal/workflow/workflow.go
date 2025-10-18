@@ -66,8 +66,8 @@ type Step struct {
 	RetryDelay   string                      `yaml:"retry_delay" json:"retry_delay"`
 	Timeout      string                      `yaml:"timeout" json:"timeout"`
 	Repeat       *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
-	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"`     // Новое поле для задержки
-	Print        string                      `yaml:"print,omitempty" json:"print,omitempty"`   // Новое поле для вывода
+	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"`           // Новое поле для задержки
+	Print        string                      `yaml:"print,omitempty" json:"print,omitempty"`         // Новое поле для вывода
 	Variables    map[string]interface{}      `yaml:"variables,omitempty" json:"variables,omitempty"` // Переменные для переопределения в use
 }
 
@@ -146,11 +146,17 @@ type Executor struct {
 	validator        *validation.Validator
 	varManager       *variables.Manager
 	progressCallback ProgressCallback
+	failFast         bool
 }
 
 // SetProgressCallback sets the progress callback function
 func (e *Executor) SetProgressCallback(callback ProgressCallback) {
 	e.progressCallback = callback
+}
+
+// SetFailFast sets the fail-fast mode
+func (e *Executor) SetFailFast(failFast bool) {
+	e.failFast = failFast
 }
 
 // NewExecutor creates a new workflow executor
@@ -291,6 +297,9 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				if step.Description != "" {
 					mergedStep.Description = step.Description
 				}
+				if step.Repeat != nil {
+					mergedStep.Repeat = step.Repeat
+				}
 				e.logger.Info("[COMPONENT] Executing use step", "use", step.Use, "step", mergedStep.Name)
 				// Initialize component variables first
 				e.initializeVariables(comp.Variables)
@@ -333,6 +342,12 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				allResults = append(allResults, *result)
 				vars := e.varManager.GetAll()
 				e.logger.Info("[DEBUG] Variables after component step", "step", mergedStep.Name, "vars", vars)
+
+				// Check fail-fast mode for component steps
+				if e.failFast && result.Status == "failed" {
+					e.logger.Error("Fail-fast mode enabled: stopping execution due to component test failure", "step", mergedStep.Name)
+					return allResults, fmt.Errorf("execution stopped at first failure (component step: %s)", mergedStep.Name)
+				}
 				continue
 			} else {
 				e.logger.Error("Component not found for use step", "use", step.Use)
@@ -342,6 +357,12 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 					Error:  fmt.Sprintf("Component not found for use: %s", step.Use),
 				}
 				allResults = append(allResults, *result)
+
+				// Check fail-fast mode for missing component
+				if e.failFast {
+					e.logger.Error("Fail-fast mode enabled: stopping execution due to missing component", "use", step.Use)
+					return allResults, fmt.Errorf("execution stopped at first failure (component not found: %s)", step.Use)
+				}
 				continue
 			}
 		}
@@ -391,6 +412,12 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 		allResults = append(allResults, *result)
 		vars := e.varManager.GetAll()
 		e.logger.Info("[DEBUG] Variables after step", "step", step.Name, "vars", vars)
+
+		// Check fail-fast mode
+		if e.failFast && result.Status == "failed" {
+			e.logger.Error("Fail-fast mode enabled: stopping execution due to test failure", "step", step.Name)
+			return allResults, fmt.Errorf("execution stopped at first failure (step: %s)", step.Name)
+		}
 	}
 
 	// Execute step groups

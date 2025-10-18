@@ -232,6 +232,64 @@ steps:
 
 This means step-level variables will override both component defaults and import-level variables.
 
+### Repeat with Components
+
+Components can be used with the `repeat` directive to execute them multiple times. This is useful for load testing, data generation, or pagination testing:
+
+```yaml
+imports:
+  - path: "components/create-purchase"
+    alias: "create-purchase"
+    variables:
+      api_url: "https://api.example.com"
+
+steps:
+  # Simple repeat with component
+  - name: "Create 5 purchases"
+    use: 'create-purchase'
+    variables:
+      amount: "500"
+    repeat:
+      count: 5
+      delay: "500ms"
+      parallel: false
+    validate:
+      - status: 201
+
+  # Repeat with dynamic variables (faker)
+  - name: "Create purchases with random amounts"
+    use: 'create-purchase'
+    repeat:
+      count: 21
+      delay: "500ms"
+      parallel: false
+      variables:
+        amount: "{{faker.number(100, 1100)}}"
+    validate:
+      - status: 201
+
+  # Parallel repeat with component
+  - name: "Create 10 purchases in parallel"
+    use: 'create-purchase'
+    variables:
+      amount: "999"
+    repeat:
+      count: 10
+      parallel: true
+    validate:
+      - status: 201
+```
+
+**Repeat Features:**
+- `count`: Number of iterations to execute
+- `delay`: Delay between iterations (e.g., "500ms", "1s")
+- `parallel`: Execute iterations in parallel (true/false)
+- `variables`: Variables specific to each iteration (supports `{{iteration}}` and `{{index}}`)
+
+**Built-in Variables:**
+- `{{iteration}}`: Current iteration number (1-based)
+- `{{index}}`: Current iteration index (0-based)
+
 ### Request Overrides
 
 You can override specific parts of requests:
