@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -184,6 +185,12 @@ func (a *App) handleRun(args []string) error {
 			spinner.Stop()
 			if len(wf.Steps) > 0 {
 				progressReporter = NewLiveProgressReporter(a.colors, len(wf.Steps))
+				// Set workflow name from file path or workflow name
+				if wf.Name != "" {
+					progressReporter.SetWorkflowName(wf.Name)
+				} else {
+					progressReporter.SetWorkflowName(filepath.Base(path))
+				}
 				progressReporter.Start()
 
 				// Set progress callback

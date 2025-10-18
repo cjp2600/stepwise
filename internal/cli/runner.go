@@ -78,9 +78,10 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 	}
 
 	type wfResult struct {
-		file    string
-		results []workflow.TestResult
-		err     error
+		file         string
+		workflowName string
+		results      []workflow.TestResult
+		err          error
 	}
 
 	resultsCh := make(chan wfResult, len(workflowFiles))
@@ -99,7 +100,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 				} else {
 					r.spinner.Error(fmt.Sprintf("Failed to load workflow: %s", filepath.Base(file)))
 				}
-				resultsCh <- wfResult{file: file, err: err}
+				resultsCh <- wfResult{file: file, workflowName: "", err: err}
 				continue
 			}
 
@@ -117,6 +118,12 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			if !r.verbose {
 				if len(wf.Steps) > 0 {
 					progressReporter = NewLiveProgressReporter(r.colors, len(wf.Steps))
+					// Set workflow name from file path or workflow name
+					if wf.Name != "" {
+						progressReporter.SetWorkflowName(fmt.Sprintf("%s • %s", wf.Name, filepath.Base(file)))
+					} else {
+						progressReporter.SetWorkflowName(filepath.Base(file))
+					}
 					progressReporter.Start()
 
 					// Set progress callback
@@ -175,8 +182,8 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 				}
 			}
 
-			resultsCh <- wfResult{file: file, results: res, err: err}
-
+			resultsCh <- wfResult{file: file, workflowName: wf.Name, results: res, err: err}
+			
 			// Check fail-fast mode in sequential execution
 			if r.failFast && err != nil {
 				r.logger.Error("Fail-fast mode: stopping due to workflow failure", "file", file)
@@ -229,7 +236,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 						if r.verbose {
 							r.logger.Error("Failed to load workflow", "file", file, "error", err)
 						}
-						resultsCh <- wfResult{file: file, err: err}
+						resultsCh <- wfResult{file: file, workflowName: "", err: err}
 
 						mu.Lock()
 						completed++
@@ -254,7 +261,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 					executor := workflow.NewExecutor(r.config, workflowLogger)
 					executor.SetFailFast(r.failFast)
 					res, err := executor.Execute(wf)
-					resultsCh <- wfResult{file: file, results: res, err: err}
+					resultsCh <- wfResult{file: file, workflowName: wf.Name, results: res, err: err}
 
 					// Check fail-fast mode after workflow execution
 					if r.failFast && err != nil {
@@ -300,7 +307,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			totalFailed++
 			continue
 		}
-		r.printWorkflowResults(rres.file, rres.results)
+		r.printWorkflowResults(rres.file, rres.workflowName, rres.results)
 		for _, result := range rres.results {
 			totalResults = append(totalResults, result)
 			if result.Status == "passed" {
@@ -412,10 +419,21 @@ func (r *WorkflowRunner) isWorkflowFile(filePath string) bool {
 }
 
 // printWorkflowResults prints results for a single workflow
-func (r *WorkflowRunner) printWorkflowResults(filePath string, results []workflow.TestResult) {
+func (r *WorkflowRunner) printWorkflowResults(filePath string, workflowName string, results []workflow.TestResult) {
+	// Format display name with workflow name and file
+	var workflowDisplayName string
+	if workflowName != "" {
+		workflowDisplayName = fmt.Sprintf("%s %s %s", 
+			r.colors.Magenta(workflowName), 
+			r.colors.Dim("•"),
+			r.colors.Dim(filepath.Base(filePath)))
+	} else {
+		workflowDisplayName = r.colors.Magenta(filepath.Base(filePath))
+	}
+	
 	fmt.Printf("\n%s %s %s\n",
 		r.colors.Cyan("==="),
-		r.colors.Bold(filePath),
+		workflowDisplayName,
 		r.colors.Cyan("==="))
 
 	passed := 0

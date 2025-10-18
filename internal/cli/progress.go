@@ -33,30 +33,46 @@ type LiveProgressReporter struct {
 	lastUpdate   time.Time
 	history      []ProgressUpdate
 	maxHistory   int
+	workflowName string // Name of the workflow being executed
 }
 
 // NewLiveProgressReporter creates a new live progress reporter
 func NewLiveProgressReporter(colors *Colors, totalSteps int) *LiveProgressReporter {
 	return &LiveProgressReporter{
-		colors:     colors,
-		totalSteps: totalSteps,
-		startTime:  time.Now(),
-		lastUpdate: time.Now(),
-		history:    make([]ProgressUpdate, 0),
-		maxHistory: 5, // Keep last 5 steps in history
+		colors:       colors,
+		totalSteps:   totalSteps,
+		startTime:    time.Now(),
+		lastUpdate:   time.Now(),
+		history:      make([]ProgressUpdate, 0),
+		maxHistory:   5, // Keep last 5 steps in history
+		workflowName: "",
 	}
+}
+
+// SetWorkflowName sets the workflow name for display
+func (p *LiveProgressReporter) SetWorkflowName(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.workflowName = name
 }
 
 // Start starts the live progress reporter
 func (p *LiveProgressReporter) Start() {
 	p.mu.Lock()
 	p.running = true
+	workflowName := p.workflowName
 	p.mu.Unlock()
 
 	// Print colored header
 	fmt.Println()
 	fmt.Println(p.colors.Cyan(strings.Repeat("=", 50)))
-	fmt.Println(p.colors.Bold(p.colors.Cyan("Starting Workflow Execution")))
+	if workflowName != "" {
+		fmt.Printf("%s %s\n",
+			p.colors.Bold(p.colors.Cyan("Starting Workflow Execution")),
+			p.colors.Magenta(fmt.Sprintf("(%s)", workflowName)))
+	} else {
+		fmt.Println(p.colors.Bold(p.colors.Cyan("Starting Workflow Execution")))
+	}
 	fmt.Println(p.colors.Cyan(strings.Repeat("=", 50)))
 }
 
