@@ -1,0 +1,12 @@
+name: "Test PASS 4 - Should NOT run with fail-fast"
+version: "1.0"
+variables:
+  base_url: "http://httpbin.org"
+steps:
+  - name: "Step 1 - Should NOT run if fail-fast works"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+    validate:
+      - status: 200
+

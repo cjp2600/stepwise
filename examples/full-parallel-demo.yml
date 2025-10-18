@@ -1,0 +1,55 @@
+name: "Full Parallel Demo"
+version: "1.0"
+description: "Demonstrates massive parallel execution with fail-fast"
+
+variables:
+  base_url: "http://httpbin.org"
+
+steps:
+  - name: "[PARALLEL TEST 1] 50 requests in parallel"
+    request:
+      method: "GET"
+      url: "{{base_url}}/delay/{{delay}}"
+    validate:
+      - status: 200
+    repeat:
+      count: 50
+      parallel: true
+      variables:
+        delay: "1"
+
+  - name: "[PARALLEL TEST 2] 100 POST requests in parallel"
+    request:
+      method: "POST"
+      url: "{{base_url}}/post"
+      headers:
+        Content-Type: "application/json"
+      body:
+        iteration: "{{iteration}}"
+        index: "{{index}}"
+        data: "Parallel request {{iteration}}"
+    validate:
+      - status: 200
+      - json: "$.json.iteration"
+        type: "string"
+    repeat:
+      count: 100
+      parallel: true
+
+  - name: "[PARALLEL TEST 3] Mix of GET requests"
+    request:
+      method: "GET"
+      url: "{{base_url}}/status/200"
+    validate:
+      - status: 200
+    repeat:
+      count: 20
+      parallel: true
+
+  - name: "[FINAL] Verify everything"
+    request:
+      method: "GET"
+      url: "{{base_url}}/get"
+    validate:
+      - status: 200
+

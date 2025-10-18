@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,11 +16,12 @@ import (
 
 // WorkflowRunner handles recursive workflow execution
 type WorkflowRunner struct {
-	config  *config.Config
-	logger  *logger.Logger
-	colors  *Colors
-	spinner *Spinner
-	verbose bool
+	config   *config.Config
+	logger   *logger.Logger
+	colors   *Colors
+	spinner  *Spinner
+	verbose  bool
+	failFast bool
 }
 
 // NewWorkflowRunner creates a new workflow runner
@@ -37,6 +39,11 @@ func NewWorkflowRunner(cfg *config.Config, log *logger.Logger) *WorkflowRunner {
 		spinner: spinner,
 		verbose: verbose,
 	}
+}
+
+// SetFailFast sets the fail-fast mode for the runner
+func (r *WorkflowRunner) SetFailFast(failFast bool) {
+	r.failFast = failFast
 }
 
 // RunWorkflows runs all workflow files in the given path
@@ -103,6 +110,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			}
 
 			executor := workflow.NewExecutor(r.config, r.logger)
+			executor.SetFailFast(r.failFast)
 
 			// Setup live progress reporter if not in verbose mode
 			var progressReporter *LiveProgressReporter
@@ -168,6 +176,12 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			}
 
 			resultsCh <- wfResult{file: file, results: res, err: err}
+
+			// Check fail-fast mode in sequential execution
+			if r.failFast && err != nil {
+				r.logger.Error("Fail-fast mode: stopping due to workflow failure", "file", file)
+				break
+			}
 		}
 	} else {
 		// Parallel worker pool
@@ -178,6 +192,10 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			r.spinner.Restart()
 		}
 
+		// Create context for fail-fast cancellation
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		fileCh := make(chan string, len(workflowFiles))
 		for _, file := range workflowFiles {
 			fileCh <- file
@@ -187,12 +205,22 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 		var wg sync.WaitGroup
 		completed := 0
 		var mu sync.Mutex
+		failureOccurred := false
 
 		for i := 0; i < parallelism; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for file := range fileCh {
+					// Check if context is cancelled (fail-fast triggered)
+					select {
+					case <-ctx.Done():
+						if r.verbose {
+							r.logger.Info("Skipping workflow due to fail-fast", "file", file)
+						}
+						continue
+					default:
+					}
 					if r.verbose {
 						r.logger.Info("Running workflow", "file", file)
 					}
@@ -214,35 +242,31 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 						continue
 					}
 
-					// In verbose mode, we don't use spinner at all
-					if !r.verbose {
-						// Stop spinner before executing workflow - logs will be collected but not printed
-						r.spinner.Stop()
-
-						// Completely disable all logging during workflow execution
-						r.logger.SetMuteMode(true)
+					// Create a separate logger for this goroutine to avoid race conditions
+					workflowLogger := logger.New()
+					if r.verbose {
+						workflowLogger.SetLevel(r.logger.GetLevel())
+					} else {
+						// In non-verbose mode, completely mute the workflow logger
+						workflowLogger.SetMuteMode(true)
 					}
 
-					executor := workflow.NewExecutor(r.config, r.logger)
+					executor := workflow.NewExecutor(r.config, workflowLogger)
+					executor.SetFailFast(r.failFast)
 					res, err := executor.Execute(wf)
 					resultsCh <- wfResult{file: file, results: res, err: err}
 
-					if !r.verbose {
-						// Re-enable logging after workflow execution
-						r.logger.SetMuteMode(false)
-
-						// Print collected logs in the report
-						logs := r.logger.GetLogBuffer()
-						if len(logs) > 0 {
-							fmt.Printf("\n%s %s %s\n",
-								r.colors.Cyan("==="),
-								r.colors.Bold(fmt.Sprintf("WORKFLOW LOGS (%s)", filepath.Base(file))),
-								r.colors.Cyan("==="))
-							for _, log := range logs {
-								fmt.Println(log)
+					// Check fail-fast mode after workflow execution
+					if r.failFast && err != nil {
+						mu.Lock()
+						if !failureOccurred {
+							failureOccurred = true
+							if r.verbose {
+								r.logger.Error("Fail-fast mode: cancelling remaining workflows", "failed_file", file)
 							}
-							fmt.Println()
+							cancel() // Cancel context to stop other workers
 						}
+						mu.Unlock()
 					}
 
 					mu.Lock()

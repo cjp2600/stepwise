@@ -1,0 +1,12 @@
+name: "Test FAIL 3"
+version: "1.0"
+variables:
+  base_url: "http://httpbin.org"
+steps:
+  - name: "Step 1 - Should FAIL (404)"
+    request:
+      method: "GET"
+      url: "{{base_url}}/status/404"
+    validate:
+      - status: 200  # Expecting 200 but will get 404
+

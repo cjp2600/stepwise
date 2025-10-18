@@ -154,6 +154,7 @@ func (a *App) handleRun(args []string) error {
 
 	if info.IsDir() {
 		runner := NewWorkflowRunner(a.config, a.logger)
+		runner.SetFailFast(*failFast)
 		return runner.RunWorkflows(path, *parallelism, *recursive)
 	} else {
 		spinner := NewSpinner(a.colors, "Loading workflow...")

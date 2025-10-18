@@ -1,0 +1,12 @@
+name: "Test PASS 2"
+version: "1.0"
+variables:
+  base_url: "http://httpbin.org"
+steps:
+  - name: "Step 1 - Should PASS"
+    request:
+      method: "GET"
+      url: "{{base_url}}/delay/1"
+    validate:
+      - status: 200
+
