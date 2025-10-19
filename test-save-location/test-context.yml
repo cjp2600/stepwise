@@ -1,9 +1,0 @@
-name: "Test Context"
-version: "1.0"
-steps:
-  - name: "Test Step"
-    request:
-      method: "GET"
-      url: "https://httpbin.org/get"
-    validate:
-      - status: 200
