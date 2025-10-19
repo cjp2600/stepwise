@@ -1,0 +1,25 @@
+name: "Get Post Component"
+version: "1.0"
+description: "Компонент для получения поста и захвата его данных"
+type: "step"
+
+variables:
+  post_id: "1"
+  api_base: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Get Post"
+    request:
+      method: "GET"
+      url: "{{api_base}}/posts/{{post_id}}"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        type: "number"
+    capture:
+      post_title: "$.title"
+      post_body: "$.body"
+      post_user_id: "$.userId"
+

@@ -1,0 +1,10 @@
+name: "Test Workflow"
+version: "1.0"
+steps:
+  - name: "Simple Test"
+    request:
+      method: "GET"
+      url: "https://httpbin.org/get"
+    validate:
+      - status: 200
+      - response_time: 1000

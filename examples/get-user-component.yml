@@ -1,0 +1,22 @@
+name: "Get User Component"
+version: "1.0"
+type: "step"
+
+variables:
+  api_base: "https://jsonplaceholder.typicode.com"
+  user_id: "1"
+
+steps:
+  - name: "Получить пользователя"
+    request:
+      method: "GET"
+      url: "{{api_base}}/users/{{user_id}}"
+      headers:
+        Accept: "application/json"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: "{{user_id}}"
+    capture:
+      saved_user_name: "$.name"
+      saved_user_email: "$.email"

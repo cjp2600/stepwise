@@ -1,0 +1,35 @@
+name: "Simple User API Smoke"
+version: "1.0"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Fetch User List"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users"
+    validate:
+      - status: 200
+      - time: "< 1500ms"
+      - json: "$"
+        type: "array"
+      - json: "$[0].id"
+        type: "number"
+    capture:
+      saved_first_user_id: "$[0].id"
+      saved_first_user_email: "$[0].email"
+      saved_first_user_city: "$[0].address.city"
+
+  - name: "Verify First User Details"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/{{saved_first_user_id}}"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: "{{saved_first_user_id}}"
+      - json: "$.email"
+        equals: "{{saved_first_user_email}}"
+      - json: "$.address.city"
+        equals: "{{saved_first_user_city}}"

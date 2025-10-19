@@ -1,0 +1,106 @@
+name: "Working Capture and Compare Example"
+version: "1.0"
+description: "Рабочий пример захвата переменных и их сравнения в следующих шагах"
+
+steps:
+  # ШАГ 1: Получаем пользователя и захватываем его данные
+  - name: "[STEP 1] Получаем пользователя и захватываем данные"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/1"
+    validate:
+      - status: 200
+    capture:
+      saved_user_id: "$.id"
+      saved_user_name: "$.name"
+      saved_user_email: "$.email"
+      saved_user_city: "$.address.city"
+      saved_user_lat: "$.address.geo.lat"
+
+  # ШАГ 2: Снова получаем того же пользователя и сравниваем все поля
+  - name: "[STEP 2] Проверяем, что данные совпадают с захваченными"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/{{saved_user_id}}"
+    validate:
+      - status: 200
+      # Сравниваем каждое поле с захваченным в шаге 1
+      - json: "$.id"
+        equals: "{{saved_user_id}}"
+      - json: "$.name"
+        equals: "{{saved_user_name}}"
+      - json: "$.email"
+        equals: "{{saved_user_email}}"
+      - json: "$.address.city"
+        equals: "{{saved_user_city}}"
+      - json: "$.address.geo.lat"
+        equals: "{{saved_user_lat}}"
+
+  # ШАГ 3: Получаем список постов и захватываем данные конкретного поста
+  - name: "[STEP 3] Получаем посты и захватываем данные поста с id=5"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts"
+    validate:
+      - status: 200
+    capture:
+      # Используем JSONPath фильтры для захвата
+      saved_post_title: "$[?(@.id == 5)].title"
+      saved_post_body: "$[?(@.id == 5)].body"
+      saved_post_user_id: "$[?(@.id == 5)].userId"
+
+  # ШАГ 4: Получаем конкретный пост и сравниваем с захваченными данными
+  - name: "[STEP 4] Проверяем пост - сравниваем с данными из массива"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts/5"
+    validate:
+      - status: 200
+      # Сравниваем каждое поле с тем, что захватили из массива
+      - json: "$.title"
+        equals: "{{saved_post_title}}"
+      - json: "$.body"
+        equals: "{{saved_post_body}}"
+      - json: "$.userId"
+        equals: "{{saved_post_user_id}}"
+
+  # ШАГ 5: Комплексный пример - захватываем данные и используем их в следующем запросе
+  - name: "[STEP 5] Захватываем userId из поста"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts/1"
+    validate:
+      - status: 200
+    capture:
+      post_author_id: "$.userId"
+
+  # ШАГ 6: Используем захваченный userId для получения автора поста
+  - name: "[STEP 6] Получаем автора поста используя захваченный userId"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/{{post_author_id}}"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: "{{post_author_id}}"
+    capture:
+      author_name: "$.name"
+      author_email: "$.email"
+
+  # ШАГ 7: Используем все захваченные переменные в заголовках и валидации
+  - name: "[STEP 7] Финальная проверка - используем все захваченные переменные"
+    request:
+      method: "GET"
+      url: "https://httpbin.org/get"
+      headers:
+        X-User-Id: "{{saved_user_id}}"
+        X-User-Name: "{{saved_user_name}}"
+        X-Post-Title: "{{saved_post_title}}"
+        X-Author-Name: "{{author_name}}"
+    validate:
+      - status: 200
+      - json: "$.headers.X-User-Id"
+        equals: "{{saved_user_id}}"
+      - json: "$.headers.X-User-Name"
+        equals: "{{saved_user_name}}"
+

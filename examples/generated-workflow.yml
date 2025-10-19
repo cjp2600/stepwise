@@ -1,0 +1,3 @@
+  imports:
+    - path: "components/get-post-component"
+      alias: "get-post"

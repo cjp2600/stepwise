@@ -19,12 +19,18 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 200
+      - json: "$"
+        type: "object"
       - json: "$.id"
         equals: 1
       - json: "$.title"
         type: "string"
+      - json: "$.title"
+        notEmpty: true
       - json: "$.body"
         type: "string"
+      - json: "$.body"
+        notEmpty: true
       - json: "$.userId"
         type: "number"
       - time: "< 5000ms"
@@ -52,6 +58,14 @@ steps:
         type: "number"
       - json: "$[0].title"
         type: "string"
+      - json: "$.length"
+        greater: 9
+      - json: "$[?(@.id == {{post_id}})]"
+        len: 1
+      - json: "$[?(@.id == {{post_id}})].userId"
+        equals: {{user_id}}
+      - json: "$[?(@.id == {{post_id}})].title"
+        equals: "{{post_title}}"
       - time: "< 10000ms"
 
   - name: "JSONPlaceholder - Create Post"
@@ -70,10 +84,18 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 201
+      - json: "$"
+        type: "object"
       - json: "$.id"
         type: "number"
+      - json: "$.id"
+        greater: 0
+      - json: "$.title"
+        type: "string"
       - json: "$.title"
         equals: "Test Post from Stepwise"
+      - json: "$.body"
+        type: "string"
       - json: "$.body"
         contains: "Stepwise"
       - json: "$.userId"
@@ -100,12 +122,16 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 200
+      - json: "$"
+        type: "object"
       - json: "$.id"
         equals: "{{new_post_id}}"
       - json: "$.title"
         contains: "Updated:"
       - json: "$.body"
         contains: "updated by Stepwise"
+      - json: "$.userId"
+        equals: 1
       - time: "< 5000ms"
 
   - name: "JSONPlaceholder - Delete Post"
@@ -118,6 +144,8 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 200
+      - json: "$"
+        type: "object"
       - time: "< 3000ms"
 
   - name: "HTTPBin - Get Request"
@@ -131,10 +159,16 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 200
+      - json: "$"
+        type: "object"
       - json: "$.url"
         contains: "httpbin.org"
       - json: "$.headers.User-Agent"
         equals: "Stepwise-Test-Suite"
+      - json: "$.headers.Accept"
+        equals: "application/json"
+      - json: "$.args"
+        type: "object"
       - time: "< 5000ms"
 
   - name: "HTTPBin - Post Request"
@@ -153,11 +187,17 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 200
+      - json: "$"
+        type: "object"
       - json: "$.url"
         contains: "httpbin.org"
+      - json: "$.headers.Content-Type"
+        equals: "application/json"
       - json: "$.json.message"
         equals: "Hello from Stepwise"
       - json: "$.json.random_id"
+        type: "string"
+      - json: "$.json.timestamp"
         type: "string"
       - time: "< 5000ms"
 
@@ -183,6 +223,12 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 200
+      - json: "$"
+        type: "object"
+      - json: "$.url"
+        contains: "/delay/2"
+      - json: "$.headers.Host"
+        equals: "httpbin.org"
       - time: "> 2000ms"
       - time: "< 5000ms"
 
@@ -197,12 +243,18 @@ steps:
       timeout: "{{timeout}}"
     validate:
       - status: 200
+      - json: "$"
+        type: "object"
       - json: "$.slideshow"
         type: "object"
       - json: "$.slideshow.author"
         type: "string"
       - json: "$.slideshow.slides"
         type: "array"
+      - json: "$.slideshow.slides[?(@.title == \"Overview\")][0].items"
+        type: "array"
+      - json: "$.slideshow.slides[?(@.title == \"Overview\")][0].items"
+        len: 3
       - time: "< 5000ms"
 
 # Error handling tests
@@ -228,4 +280,4 @@ steps:
       timeout: "5s"
     validate:
       - status: 0  # Expected to timeout
-      - time: "< 10000ms" 
+      - time: "< 10000ms"

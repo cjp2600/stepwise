@@ -1,0 +1,94 @@
+name: "Component Capture Workflow"
+version: "1.0"
+description: "Демонстрация захвата переменных в компонентах и их использования в других шагах"
+
+imports:
+  - path: "components/get-post-component"
+    alias: "get-post"
+  
+  - path: "components/get-user-by-id"
+    alias: "get-user"
+
+steps:
+  # ШАГ 1: Используем компонент для получения поста и захвата данных
+  - name: "[STEP 1] Получаем пост #5 через компонент"
+    use: 'get-post'
+    variables:
+      post_id: "5"
+    # Компонент захватит post_title, post_body, post_user_id
+
+  # ШАГ 2: Проверяем, что переменные из компонента доступны
+  - name: "[STEP 2] Проверяем захваченные данные из компонента"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/posts/5"
+    validate:
+      - status: 200
+      # Сравниваем с переменными, захваченными компонентом
+      - json: "$.title"
+        equals: "{{post_title}}"
+      - json: "$.body"
+        equals: "{{post_body}}"
+      - json: "$.userId"
+        equals: "{{post_user_id}}"
+
+  # ШАГ 3: Используем захваченный post_user_id для получения автора поста
+  - name: "[STEP 3] Получаем автора поста используя захваченный userId"
+    use: 'get-user'
+    variables:
+      user_id: "{{post_user_id}}"
+    # Компонент захватит user_name, user_email, user_city, user_company
+
+  # ШАГ 4: Проверяем данные автора
+  - name: "[STEP 4] Проверяем данные автора из второго компонента"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/{{post_user_id}}"
+    validate:
+      - status: 200
+      # Сравниваем с переменными из второго компонента
+      - json: "$.name"
+        equals: "{{user_name}}"
+      - json: "$.email"
+        equals: "{{user_email}}"
+      - json: "$.address.city"
+        equals: "{{user_city}}"
+      - json: "$.company.name"
+        equals: "{{user_company}}"
+
+  # ШАГ 5: Получаем другого пользователя через компонент
+  - name: "[STEP 5] Получаем пользователя #3"
+    use: 'get-user'
+    variables:
+      user_id: "3"
+    # Переменные будут перезаписаны новыми значениями
+
+  # ШАГ 6: Проверяем, что переменные обновились
+  - name: "[STEP 6] Проверяем обновленные переменные"
+    request:
+      method: "GET"
+      url: "https://jsonplaceholder.typicode.com/users/3"
+    validate:
+      - status: 200
+      - json: "$.name"
+        equals: "{{user_name}}"
+      - json: "$.email"
+        equals: "{{user_email}}"
+
+  # ШАГ 7: Используем все захваченные переменные
+  - name: "[STEP 7] Финальная проверка - используем все переменные"
+    request:
+      method: "GET"
+      url: "https://httpbin.org/get"
+      headers:
+        X-Post-Title: "{{post_title}}"
+        X-Post-User-Id: "{{post_user_id}}"
+        X-Current-User-Name: "{{user_name}}"
+        X-Current-User-City: "{{user_city}}"
+    validate:
+      - status: 200
+      - json: "$.headers.X-Post-Title"
+        equals: "{{post_title}}"
+      - json: "$.headers.X-Current-User-Name"
+        equals: "{{user_name}}"
+

@@ -183,7 +183,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			}
 
 			resultsCh <- wfResult{file: file, workflowName: wf.Name, results: res, err: err}
-			
+
 			// Check fail-fast mode in sequential execution
 			if r.failFast && err != nil {
 				r.logger.Error("Fail-fast mode: stopping due to workflow failure", "file", file)
@@ -423,14 +423,14 @@ func (r *WorkflowRunner) printWorkflowResults(filePath string, workflowName stri
 	// Format display name with workflow name and file
 	var workflowDisplayName string
 	if workflowName != "" {
-		workflowDisplayName = fmt.Sprintf("%s %s %s", 
-			r.colors.Magenta(workflowName), 
+		workflowDisplayName = fmt.Sprintf("%s %s %s",
+			r.colors.Magenta(workflowName),
 			r.colors.Dim("•"),
 			r.colors.Dim(filepath.Base(filePath)))
 	} else {
 		workflowDisplayName = r.colors.Magenta(filepath.Base(filePath))
 	}
-	
+
 	fmt.Printf("\n%s %s %s\n",
 		r.colors.Cyan("==="),
 		workflowDisplayName,

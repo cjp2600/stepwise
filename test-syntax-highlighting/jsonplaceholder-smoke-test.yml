@@ -1,0 +1,44 @@
+name: "JSONPlaceholder Smoke Test"
+version: "1.0"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Получить список постов"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts"
+    validate:
+      - status: 200
+      - json: "$[0].id"
+        type: "number"
+    capture:
+      saved_first_post_id: "$[0].id"
+      saved_first_post_title: "$[0].title"
+
+  - name: "Проверить детали первого поста"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/{{saved_first_post_id}}"
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: "{{saved_first_post_id}}"
+      - json: "$.title"
+        equals: "{{saved_first_post_title}}"
+      - json: "$.userId"
+        type: "number"
+    capture:
+      saved_first_post_user_id: "$.userId"
+
+  - name: "Проверить комментарии поста"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/{{saved_first_post_id}}/comments"
+    validate:
+      - status: 200
+      - json: "$[0].postId"
+        equals: "{{saved_first_post_id}}"
+      - json: "$[0].email"
+        pattern: "^[^@]+@[^@]+\\.[^@]+$"

@@ -1,0 +1,21 @@
+name: "Coob Availability Check"
+version: "1.0"
+description: "Проверяет доступность главной страницы coob.app"
+
+variables:
+  base_url: "https://coob.app"
+  timeout: "5s"
+
+steps:
+  - name: "Homepage Availability"
+    description: "Проверяем, что корневой эндпоинт отвечает 200 OK"
+    request:
+      method: "GET"
+      url: "{{base_url}}/"
+      timeout: "{{timeout}}"
+      headers:
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        User-Agent: "Stepwise-Availability-Check"
+    validate:
+      - status: 200
+      - time: "< 3000ms"

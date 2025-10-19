@@ -1,14 +1,17 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/cjp2600/stepwise/internal/ai"
 	"github.com/cjp2600/stepwise/internal/config"
 	"github.com/cjp2600/stepwise/internal/logger"
 	"github.com/cjp2600/stepwise/internal/workflow"
@@ -73,6 +76,8 @@ func (a *App) Run(args []string) error {
 		return a.handleInfo(commandArgs)
 	case "generate":
 		return a.handleGenerate(commandArgs)
+	case "codex":
+		return a.handleCodex(commandArgs)
 	case "help":
 		return a.showHelp()
 	case "version":
@@ -278,6 +283,66 @@ func (a *App) handleGenerate(args []string) error {
 	return fmt.Errorf("data generation not implemented yet")
 }
 
+// handleCodex handles the codex command
+func (a *App) handleCodex(args []string) error {
+	// Parse flags
+	fs := flag.NewFlagSet("codex", flag.ContinueOnError)
+	model := fs.StringP("model", "m", "", "Model to use (default: codex default)")
+	_ = fs.Parse(args)
+
+	// Get path from remaining args
+	path := "."
+	if len(fs.Args()) > 0 {
+		path = fs.Args()[0]
+	}
+
+	// Check if path exists
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("path does not exist: %s", path)
+	}
+
+	// Check if codex CLI is installed
+	if _, err := exec.LookPath("codex"); err != nil {
+		fmt.Printf("%s\n", a.colors.Red("Error: codex CLI is not installed"))
+		fmt.Printf("%s\n\n", a.colors.Yellow("Please install codex CLI first:"))
+		fmt.Printf("%s\n", a.colors.Cyan("  npm install -g @openai/codex"))
+		fmt.Printf("\nOr visit: %s\n\n", a.colors.Cyan("https://openai.com/codex"))
+		return fmt.Errorf("codex CLI is not installed")
+	}
+
+	fmt.Printf("%s\n", a.colors.Bold("Stepwise AI Assistant"))
+	fmt.Printf("%s\n\n", a.colors.Dim("Powered by OpenAI Codex CLI"))
+
+	// Show loading message
+	spinner := NewSpinner(a.colors, "Analyzing workflows and components...")
+	spinner.Start()
+
+	// Create AI client
+	client := ai.NewClient()
+	if *model != "" {
+		client.SetModel(*model)
+	}
+	client.SetWorkingDir(path)
+
+	// Build context prompt
+	contextPrompt, err := ai.BuildContextPrompt(path)
+	if err != nil {
+		spinner.Error("Failed to build context")
+		return fmt.Errorf("failed to build context: %w", err)
+	}
+
+	spinner.Success(fmt.Sprintf("Loaded context from %s", path))
+
+	// Create chat interface
+	chat := ai.NewChatInterface(client)
+	chat.SetOutputDirectory(path)
+	chat.AddSystemMessage(contextPrompt)
+
+	// Start interactive chat
+	ctx := context.Background()
+	return chat.Start(ctx)
+}
+
 // showHelp shows the help message
 func (a *App) showHelp() error {
 	fmt.Printf("%s\n", a.colors.Bold("Stepwise - API Testing Framework"))
@@ -292,6 +357,7 @@ func (a *App) showHelp() error {
 	fmt.Printf("  %s    %s\n", a.colors.Green("info"), "Show workflow information")
 	fmt.Printf("  %s    %s\n", a.colors.Green("init"), "Initialize a new project")
 	fmt.Printf("  %s    %s\n", a.colors.Green("generate"), "Generate test data")
+	fmt.Printf("  %s    %s\n", a.colors.Green("codex"), "AI assistant for creating workflows (requires codex CLI)")
 	fmt.Printf("  %s    %s\n", a.colors.Green("help"), "Show this help message")
 	fmt.Printf("  %s    %s\n", a.colors.Green("version"), "Show version information")
 
@@ -301,6 +367,8 @@ func (a *App) showHelp() error {
 	fmt.Printf("  %s\n", "stepwise run --parallel 4 --recursive ./tests")
 	fmt.Printf("  %s\n", "stepwise validate workflow.yml")
 	fmt.Printf("  %s\n", "stepwise info workflow.yml")
+	fmt.Printf("  %s\n", "stepwise codex ./examples")
+	fmt.Printf("  %s\n", "stepwise codex --model gpt-4o .")
 
 	fmt.Printf("\n%s\n", a.colors.Bold("GLOBAL OPTIONS:"))
 	fmt.Printf("  %s    %s\n", a.colors.Cyan("--help, -h"), "Show help message")
