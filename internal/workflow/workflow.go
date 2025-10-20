@@ -300,6 +300,10 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				if step.Repeat != nil {
 					mergedStep.Repeat = step.Repeat
 				}
+				// Copy ShowResponse: if either component or step has it set to true, show response
+				if step.ShowResponse {
+					mergedStep.ShowResponse = true
+				}
 				e.logger.Info("[COMPONENT] Executing use step", "use", step.Use, "step", mergedStep.Name)
 				// Initialize component variables first
 				e.initializeVariables(comp.Variables)
