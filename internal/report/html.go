@@ -647,78 +647,79 @@ func generateHTML(data HTMLReportData) (string, error) {
                             </div>
                         </div>
                         <div class="test-details" id="details-{{$globalIndex}}">
-                    {{if $result.Error}}
-                    <div class="detail-section">
-                        <h4>Error</h4>
-                        <div class="error-message">{{$result.Error}}</div>
-                    </div>
-                    {{end}}
-                    
-                    {{if $result.PrintText}}
-                    <div class="detail-section">
-                        <h4>Print Output</h4>
-                        <div class="print-text">{{$result.PrintText}}</div>
-                    </div>
-                    {{end}}
-                    
-                    {{if $result.Validations}}
-                    <div class="detail-section">
-                        <h4>Validations ({{len $result.Validations}})</h4>
-                        <div class="validations">
-                            {{range $result.Validations}}
-                            <div class="validation {{if .Passed}}passed{{else}}failed{{end}}">
-                                <span class="validation-icon">{{if .Passed}}✓{{else}}✗{{end}}</span>
-                                <div class="validation-details">
-                                    <div class="validation-type">{{.Type}}</div>
-                                    <div class="validation-expected">
-                                        Expected: {{formatValue .Expected}} | Actual: {{formatValue .Actual}}
-                                        {{if .Error}}<br><strong>Error:</strong> {{.Error}}{{end}}
+                            {{if $result.Error}}
+                            <div class="detail-section">
+                                <h4>Error</h4>
+                                <div class="error-message">{{$result.Error}}</div>
+                            </div>
+                            {{end}}
+                            
+                            {{if $result.PrintText}}
+                            <div class="detail-section">
+                                <h4>Print Output</h4>
+                                <div class="print-text">{{$result.PrintText}}</div>
+                            </div>
+                            {{end}}
+                            
+                            {{if $result.Validations}}
+                            <div class="detail-section">
+                                <h4>Validations ({{len $result.Validations}})</h4>
+                                <div class="validations">
+                                    {{range $result.Validations}}
+                                    <div class="validation {{if .Passed}}passed{{else}}failed{{end}}">
+                                        <span class="validation-icon">{{if .Passed}}✓{{else}}✗{{end}}</span>
+                                        <div class="validation-details">
+                                            <div class="validation-type">{{.Type}}</div>
+                                            <div class="validation-expected">
+                                                Expected: {{formatValue .Expected}} | Actual: {{formatValue .Actual}}
+                                                {{if .Error}}<br><strong>Error:</strong> {{.Error}}{{end}}
+                                            </div>
+                                        </div>
                                     </div>
+                                    {{end}}
                                 </div>
                             </div>
                             {{end}}
-                        </div>
-                    </div>
-                    {{end}}
-                    
-                    {{if $result.CapturedData}}
-                    <div class="detail-section">
-                        <h4>Captured Data</h4>
-                        <div class="captured-data">
-                            <pre>{{formatJSON $result.CapturedData}}</pre>
-                        </div>
-                    </div>
-                    {{end}}
-                    
-                    {{if $result.RepeatCount}}
-                    <div class="detail-section">
-                        <h4>Repeat Results ({{$result.RepeatCount}} iterations)</h4>
-                        <div class="repeat-results">
-                            {{range $i, $repeatResult := $result.RepeatResults}}
-                            <div class="repeat-iteration">
-                                <strong>Iteration {{add $i 1}}:</strong> 
-                                <span class="status-badge {{$repeatResult.Status}}">{{$repeatResult.Status}}</span>
-                                <span class="test-duration">{{formatDuration $repeatResult.Duration}}</span>
-                                {{if $repeatResult.Error}}
-                                <div class="error-message" style="margin-top: 10px;">{{$repeatResult.Error}}</div>
-                                {{end}}
+                            
+                            {{if $result.CapturedData}}
+                            <div class="detail-section">
+                                <h4>Captured Data</h4>
+                                <div class="captured-data">
+                                    <pre>{{formatJSON $result.CapturedData}}</pre>
+                                </div>
+                            </div>
+                            {{end}}
+                            
+                            {{if $result.RepeatCount}}
+                            <div class="detail-section">
+                                <h4>Repeat Results ({{$result.RepeatCount}} iterations)</h4>
+                                <div class="repeat-results">
+                                    {{range $i, $repeatResult := $result.RepeatResults}}
+                                    <div class="repeat-iteration">
+                                        <strong>Iteration {{add $i 1}}:</strong> 
+                                        <span class="status-badge {{$repeatResult.Status}}">{{$repeatResult.Status}}</span>
+                                        <span class="test-duration">{{formatDuration $repeatResult.Duration}}</span>
+                                        {{if $repeatResult.Error}}
+                                        <div class="error-message" style="margin-top: 10px;">{{$repeatResult.Error}}</div>
+                                        {{end}}
+                                    </div>
+                                    {{end}}
+                                </div>
+                            </div>
+                            {{end}}
+                            
+                            {{if $result.Retries}}
+                            <div class="detail-section">
+                                <h4>Retries</h4>
+                                <div>This test was retried {{$result.Retries}} time(s)</div>
                             </div>
                             {{end}}
                         </div>
-                    </div>
-                    {{end}}
-                    
-                    {{if $result.Retries}}
-                    <div class="detail-section">
-                        <h4>Retries</h4>
-                        <div>This test was retried {{$result.Retries}} time(s)</div>
                     </div>
                     {{end}}
                 </div>
             </div>
             {{end}}
-                </div>
-            </div>
             {{else}}
             {{range $index, $result := .Results}}
             <div class="test-result {{$result.Status}}" onclick="toggleDetails({{$index}})">
