@@ -304,11 +304,21 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 	totalDuration := 0
 
 	for rres := range resultsCh {
-		if rres.err != nil {
+		// Even if there was an error loading the workflow, we still want to include
+		// any partial results if they exist. If workflow failed to load, results will be empty.
+		if rres.err != nil && len(rres.results) == 0 {
+			// Workflow failed to load completely, no results to add
 			totalFailed++
 			continue
 		}
-		r.printWorkflowResults(rres.file, rres.workflowName, rres.results)
+
+		// Print results for this workflow (if any)
+		if len(rres.results) > 0 {
+			r.printWorkflowResults(rres.file, rres.workflowName, rres.results)
+		}
+
+		// Add all results to totalResults (for HTML report)
+		// This works for both sequential and parallel execution modes
 		for _, result := range rres.results {
 			totalResults = append(totalResults, result)
 			if result.Status == "passed" {

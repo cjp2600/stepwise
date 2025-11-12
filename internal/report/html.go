@@ -375,6 +375,9 @@ func generateHTML(data HTMLReportData) (string, error) {
             padding: 15px;
             border-radius: 6px;
             border-left: 4px solid #007bff;
+            max-height: 300px;
+            overflow-y: auto;
+            overflow-x: auto;
         }
         
         .captured-data pre {
