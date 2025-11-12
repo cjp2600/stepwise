@@ -1,0 +1,64 @@
+name: "Polling Component Test"
+version: "1.0"
+description: "Тест поллинга в компонентах и через use"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+imports:
+  - path: "components/poll-user-status"
+    alias: "poll-user"
+    variables:
+      api_base: "{{base_url}}"
+
+steps:
+  - name: "Test 1: Direct Polling in Step"
+    description: "Прямой поллинг в шаге workflow"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+    poll:
+      max_attempts: 3
+      interval: "500ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 1
+    validate:
+      - status: 200
+
+  - name: "Test 2: Polling in Component via use"
+    description: "Поллинг внутри компонента, используемого через use"
+    use: "poll-user"
+    variables:
+      user_id: "1"
+    validate:
+      - status: 200
+
+  - name: "Test 3: Override Poll in Component"
+    description: "Переопределение поллинга на уровне шага"
+    use: "poll-user"
+    variables:
+      user_id: "2"
+    poll:
+      max_attempts: 4
+      interval: "800ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 2
+        - json: "$.name"
+          type: "string"
+    validate:
+      - status: 200
+
+  - name: "Test 4: Component Poll with Different User"
+    description: "Использование компонента с поллингом для другого пользователя"
+    use: "poll-user"
+    variables:
+      user_id: "3"
+    validate:
+      - status: 200
+    capture:
+      captured_name: "$.name"
+

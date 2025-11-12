@@ -1,0 +1,57 @@
+name: "Polling Component Verification"
+version: "1.0"
+description: "Проверка работы поллинга в компонентах - компонент с поллингом используется без переопределения"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+imports:
+  - path: "components/poll-user-status"
+    alias: "poll-user"
+    variables:
+      api_base: "{{base_url}}"
+
+steps:
+  - name: "Component Polling Without Override"
+    description: "Использование компонента с поллингом БЕЗ переопределения - должен использовать поллинг из компонента"
+    use: "poll-user"
+    variables:
+      user_id: "1"
+    # НЕ переопределяем poll - должен использоваться poll из компонента (max_attempts: 5, interval: 1s)
+    validate:
+      - status: 200
+      - json: "$.id"
+        equals: 1
+
+  - name: "Component Polling With Override"
+    description: "Переопределение поллинга на уровне шага"
+    use: "poll-user"
+    variables:
+      user_id: "2"
+    poll:
+      max_attempts: 3
+      interval: "500ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 2
+    validate:
+      - status: 200
+
+  - name: "Direct Polling in Workflow Step"
+    description: "Прямой поллинг в шаге workflow (не компонент)"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+    poll:
+      max_attempts: 4
+      interval: "600ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 1
+        - json: "$.title"
+          type: "string"
+    validate:
+      - status: 200
+

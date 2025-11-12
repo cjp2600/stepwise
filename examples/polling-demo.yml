@@ -1,0 +1,78 @@
+name: "Polling Demo"
+version: "1.0"
+description: "Demonstrates polling functionality to wait for transaction to appear in API"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+
+steps:
+  - name: "Poll for Post Existence"
+    description: "Poll API until post with ID 1 exists and has valid data"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+      timeout: "{{timeout}}"
+      headers:
+        Accept: "application/json"
+    poll:
+      max_attempts: 5
+      interval: "1s"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 1
+        - json: "$.title"
+          type: "string"
+          empty: false
+    validate:
+      - status: 200
+      - json: "$.userId"
+        type: "number"
+    capture:
+      post_title: "$.title"
+
+  - name: "Poll for User Data"
+    description: "Poll until user data is available"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+      timeout: "{{timeout}}"
+    poll:
+      max_attempts: 3
+      interval: "500ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 1
+        - json: "$.name"
+          type: "string"
+          empty: false
+    validate:
+      - status: 200
+      - json: "$.email"
+        type: "string"
+        pattern: "^[^@]+@[^@]+\\.[^@]+$"
+
+  - name: "Poll with Multiple Conditions"
+    description: "Poll until all conditions are met"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+      timeout: "{{timeout}}"
+    poll:
+      max_attempts: 5
+      interval: "1s"
+      until:
+        - status: 200
+        - json: "$.id"
+          type: "number"
+        - json: "$.title"
+          type: "string"
+        - json: "$.body"
+          type: "string"
+          empty: false
+    validate:
+      - status: 200
+      - time: "< 1000ms"
+

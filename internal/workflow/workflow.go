@@ -66,6 +66,7 @@ type Step struct {
 	RetryDelay   string                      `yaml:"retry_delay" json:"retry_delay"`
 	Timeout      string                      `yaml:"timeout" json:"timeout"`
 	Repeat       *RepeatConfig               `yaml:"repeat,omitempty" json:"repeat,omitempty"`
+	Poll         *PollConfig                 `yaml:"poll,omitempty" json:"poll,omitempty"`           // Polling configuration
 	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"`           // Новое поле для задержки
 	Print        string                      `yaml:"print,omitempty" json:"print,omitempty"`         // Новое поле для вывода
 	Variables    map[string]interface{}      `yaml:"variables,omitempty" json:"variables,omitempty"` // Переменные для переопределения в use
@@ -77,6 +78,13 @@ type RepeatConfig struct {
 	Delay     string                 `yaml:"delay,omitempty" json:"delay,omitempty"`
 	Parallel  bool                   `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 	Variables map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`
+}
+
+// PollConfig represents configuration for polling a step until condition is met
+type PollConfig struct {
+	MaxAttempts int                         `yaml:"max_attempts" json:"max_attempts"`             // Maximum number of polling attempts
+	Interval    string                      `yaml:"interval,omitempty" json:"interval,omitempty"` // Delay between polling attempts (e.g., "1s", "500ms")
+	Until       []validation.ValidationRule `yaml:"until" json:"until"`                           // Conditions that must be met to stop polling
 }
 
 // Request represents an HTTP or gRPC request
@@ -300,6 +308,16 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				if step.Repeat != nil {
 					mergedStep.Repeat = step.Repeat
 				}
+				// Copy Poll configuration: step-level poll overrides component poll
+				// If component has poll but step doesn't, keep component's poll
+				// If step has poll, it overrides component's poll
+				if step.Poll != nil {
+					mergedStep.Poll = step.Poll
+					e.logger.Debug("[COMPONENT] Overriding poll configuration from step", "step", step.Name, "max_attempts", step.Poll.MaxAttempts, "interval", step.Poll.Interval)
+				} else if mergedStep.Poll != nil {
+					e.logger.Debug("[COMPONENT] Using poll configuration from component", "step", step.Name, "max_attempts", mergedStep.Poll.MaxAttempts, "interval", mergedStep.Poll.Interval)
+				}
+				// Note: If step.Poll is nil but component has poll, mergedStep already has it from comp.Step
 				// Copy ShowResponse: if either component or step has it set to true, show response
 				if step.ShowResponse {
 					mergedStep.ShowResponse = true
@@ -640,6 +658,11 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		return nil
 	}
 
+	// Check if this step has polling configuration
+	if step.Poll != nil {
+		return e.executeStepWithPoll(step, result, startTime)
+	}
+
 	var lastError error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
@@ -812,6 +835,220 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 
 	result.Duration = time.Since(startTime)
 	return lastError
+}
+
+// executeStepWithPoll executes a step with polling until conditions are met
+func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime time.Time) error {
+	pollConfig := step.Poll
+	maxAttempts := pollConfig.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 10 // Default to 10 attempts if not specified
+	}
+
+	interval := e.parseTimeout(pollConfig.Interval)
+	if interval <= 0 {
+		interval = 1 * time.Second // Default to 1 second if not specified
+	}
+
+	e.logger.Info("Executing step with polling",
+		"step", step.Name,
+		"max_attempts", maxAttempts,
+		"interval", interval)
+
+	var lastError error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		e.logger.Debug("Polling attempt", "step", step.Name, "attempt", attempt, "max_attempts", maxAttempts)
+
+		// Substitute variables in request
+		substitutedReq, err := e.substituteRequestVariables(&step.Request)
+		if err != nil {
+			lastError = fmt.Errorf("variable substitution failed: %w", err)
+			if attempt < maxAttempts {
+				time.Sleep(interval)
+			}
+			continue
+		}
+
+		// Set default protocol to HTTP if not specified
+		if substitutedReq.Protocol == "" {
+			substitutedReq.Protocol = "http"
+		}
+
+		// Execute request based on protocol
+		var httpResponse *httpclient.Response
+		var grpcResponse *grpcclient.Response
+		var requestErr error
+
+		if substitutedReq.Protocol == "grpc" {
+			// Initialize gRPC client if not already done
+			if e.grpcClient == nil {
+				grpcClient, err := grpcclient.NewClient(substitutedReq.ServerAddr, substitutedReq.Insecure, e.logger)
+				if err != nil {
+					lastError = fmt.Errorf("failed to create gRPC client: %w", err)
+					if attempt < maxAttempts {
+						time.Sleep(interval)
+					}
+					continue
+				}
+				e.grpcClient = grpcClient
+			}
+
+			// Execute gRPC request
+			grpcReq := &grpcclient.Request{
+				Service:    substitutedReq.Service,
+				Method:     substitutedReq.GRPCMethod,
+				Data:       substitutedReq.Data,
+				Metadata:   substitutedReq.Metadata,
+				ServerAddr: substitutedReq.ServerAddr,
+				Insecure:   substitutedReq.Insecure,
+				Timeout:    e.parseTimeout(substitutedReq.Timeout),
+			}
+			grpcResponse, requestErr = e.grpcClient.Execute(grpcReq)
+		} else {
+			// Execute HTTP request (default)
+			httpReq := &httpclient.Request{
+				Method:  substitutedReq.Method,
+				URL:     substitutedReq.URL,
+				Headers: substitutedReq.Headers,
+				Body:    substitutedReq.Body,
+				Query:   substitutedReq.Query,
+				Timeout: e.parseTimeout(substitutedReq.Timeout),
+				Auth:    substitutedReq.Auth,
+			}
+			httpResponse, requestErr = e.httpClient.Execute(httpReq)
+		}
+
+		if requestErr != nil {
+			lastError = fmt.Errorf("request failed: %w", requestErr)
+			e.logger.Debug("Polling attempt failed", "step", step.Name, "attempt", attempt, "error", requestErr)
+			if attempt < maxAttempts {
+				time.Sleep(interval)
+			}
+			continue
+		}
+
+		// Check polling conditions (poll.until)
+		var validationResults []validation.ValidationResult
+		var validationErr error
+		var responseForValidation *httpclient.Response
+
+		if substitutedReq.Protocol == "grpc" {
+			// For gRPC, create a mock HTTP response for validation
+			jsonData, err := json.Marshal(grpcResponse.Data)
+			if err != nil {
+				lastError = fmt.Errorf("failed to marshal gRPC response for validation: %w", err)
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+			responseForValidation = &httpclient.Response{
+				StatusCode: 200, // gRPC OK status
+				Body:       jsonData,
+				Duration:   grpcResponse.Duration,
+			}
+		} else {
+			responseForValidation = httpResponse
+		}
+
+		// Validate against poll.until conditions
+		validationResults, validationErr = e.validator.Validate(responseForValidation, pollConfig.Until)
+
+		// Also run regular validations if specified (for reporting)
+		if len(step.Validate) > 0 {
+			regularResults, _ := e.validator.Validate(responseForValidation, step.Validate)
+			result.Validations = regularResults
+		} else {
+			// Use polling validation results for reporting
+			result.Validations = validationResults
+		}
+
+		// Check if all polling conditions are met
+		allConditionsMet := true
+		if validationErr != nil {
+			allConditionsMet = false
+		} else {
+			for _, validationResult := range validationResults {
+				if !validationResult.Passed {
+					allConditionsMet = false
+					break
+				}
+			}
+		}
+
+		if allConditionsMet {
+			// Success! All polling conditions are met
+			e.logger.Info("Polling condition met", "step", step.Name, "attempt", attempt)
+
+			// Capture values if specified
+			if step.Capture != nil {
+				var captureErr error
+				if substitutedReq.Protocol == "grpc" {
+					captureErr = e.captureValues(responseForValidation, step.Capture, result)
+				} else {
+					captureErr = e.captureValues(httpResponse, step.Capture, result)
+				}
+				if captureErr != nil {
+					e.logger.Warn("Failed to capture values", "step", step.Name, "error", captureErr)
+				}
+			}
+
+			// Show response if requested
+			if step.ShowResponse {
+				if substitutedReq.Protocol == "grpc" {
+					if grpcResponse != nil {
+						jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
+						if err == nil {
+							fmt.Println("================ RESPONSE (gRPC) ================")
+							fmt.Println(string(jsonData))
+							fmt.Println("================ END RESPONSE ================")
+						}
+					}
+				} else {
+					if httpResponse != nil && len(httpResponse.Body) > 0 {
+						fmt.Println("================ RESPONSE ================")
+						fmt.Println(string(httpResponse.Body))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			}
+
+			result.Duration = time.Since(startTime)
+			return nil
+		}
+
+		// Conditions not met, log and continue polling
+		e.logger.Debug("Polling condition not met, will retry",
+			"step", step.Name,
+			"attempt", attempt,
+			"max_attempts", maxAttempts)
+
+		// If this is not the last attempt, wait before next poll
+		if attempt < maxAttempts {
+			time.Sleep(interval)
+		}
+	}
+
+	// All attempts exhausted, condition not met
+	result.Duration = time.Since(startTime)
+	if lastError != nil {
+		return fmt.Errorf("polling failed after %d attempts: %w", maxAttempts, lastError)
+	}
+
+	// Build error message from failed validations
+	var failedValidations []string
+	for _, validationResult := range result.Validations {
+		if !validationResult.Passed {
+			failedValidations = append(failedValidations, validationResult.Error)
+		}
+	}
+
+	if len(failedValidations) > 0 {
+		return fmt.Errorf("polling condition not met after %d attempts: %s", maxAttempts, strings.Join(failedValidations, "; "))
+	}
+
+	return fmt.Errorf("polling condition not met after %d attempts", maxAttempts)
 }
 
 // executeStepWithRepeat executes a step with repeat configuration

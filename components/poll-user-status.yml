@@ -1,0 +1,34 @@
+name: "Poll User Status Component"
+version: "1.0"
+description: "Компонент для поллинга статуса пользователя"
+type: "step"
+
+variables:
+  user_id: "1"
+  api_base: "https://jsonplaceholder.typicode.com"
+
+steps:
+  - name: "Poll User Status"
+    request:
+      method: "GET"
+      url: "{{api_base}}/users/{{user_id}}"
+      headers:
+        Accept: "application/json"
+    poll:
+      max_attempts: 5
+      interval: "1s"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: "{{user_id}}"
+        - json: "$.name"
+          type: "string"
+          empty: false
+    validate:
+      - status: 200
+      - json: "$.email"
+        type: "string"
+    capture:
+      user_name: "$.name"
+      user_email: "$.email"
+

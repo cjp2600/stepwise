@@ -1,0 +1,75 @@
+name: "Complete Polling Test"
+version: "1.0"
+description: "Полный тест всех сценариев использования поллинга: в шагах, в компонентах, с переопределением"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+
+imports:
+  - path: "components/poll-user-status"
+    alias: "poll-user"
+    variables:
+      api_base: "{{base_url}}"
+
+steps:
+  - name: "✅ Test 1: Polling in Direct Step"
+    description: "Поллинг напрямую в шаге workflow (не компонент)"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+    poll:
+      max_attempts: 3
+      interval: "500ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 1
+    validate:
+      - status: 200
+
+  - name: "✅ Test 2: Polling in Component (No Override)"
+    description: "Использование компонента с поллингом БЕЗ переопределения - используется poll из компонента"
+    use: "poll-user"
+    variables:
+      user_id: "2"
+    # Poll из компонента: max_attempts: 5, interval: 1s
+    validate:
+      - status: 200
+
+  - name: "✅ Test 3: Polling in Component (With Override)"
+    description: "Переопределение поллинга на уровне шага - используется переопределенный poll"
+    use: "poll-user"
+    variables:
+      user_id: "3"
+    poll:
+      max_attempts: 4
+      interval: "800ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 3
+    validate:
+      - status: 200
+
+  - name: "✅ Test 4: Multiple Polling Conditions"
+    description: "Поллинг с несколькими условиями"
+    request:
+      method: "GET"
+      url: "{{base_url}}/posts/1"
+    poll:
+      max_attempts: 5
+      interval: "600ms"
+      until:
+        - status: 200
+        - json: "$.id"
+          equals: 1
+        - json: "$.title"
+          type: "string"
+          empty: false
+        - json: "$.body"
+          type: "string"
+          empty: false
+    validate:
+      - status: 200
+      - time: "< 1000ms"
+
