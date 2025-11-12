@@ -12,6 +12,13 @@ import (
 	"github.com/cjp2600/stepwise/internal/workflow"
 )
 
+// WorkflowGroup represents a group of test results from a single workflow file
+type WorkflowGroup struct {
+	FileName     string
+	WorkflowName string
+	Results      []workflow.TestResult
+}
+
 // HTMLReportData represents the data structure for HTML report
 type HTMLReportData struct {
 	Title         string
@@ -25,6 +32,8 @@ type HTMLReportData struct {
 	SuccessRate   float64
 	Results       []workflow.TestResult
 	WorkflowFile  string
+	Groups        []WorkflowGroup // Groups for multi-file reports
+	IsGrouped     bool            // Whether to show grouped view
 }
 
 // GenerateHTMLReport generates a self-contained HTML report from test results
@@ -65,6 +74,80 @@ func GenerateHTMLReport(results []workflow.TestResult, workflowName string, work
 		SuccessRate:   successRate,
 		Results:       results,
 		WorkflowFile:  workflowFile,
+		IsGrouped:     false,
+	}
+
+	// Generate HTML
+	htmlContent, err := generateHTML(data)
+	if err != nil {
+		return fmt.Errorf("failed to generate HTML: %w", err)
+	}
+
+	// Determine output path
+	if outputPath == "" {
+		timestamp := time.Now().Format("20060102_150405")
+		outputPath = fmt.Sprintf("test-report_%s.html", timestamp)
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(outputPath)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
+
+	// Write HTML file
+	if err := os.WriteFile(outputPath, []byte(htmlContent), 0644); err != nil {
+		return fmt.Errorf("failed to write HTML file: %w", err)
+	}
+
+	return nil
+}
+
+// GenerateHTMLReportFromGroups generates a self-contained HTML report from grouped test results
+func GenerateHTMLReportFromGroups(groups []WorkflowGroup, workflowName string, outputPath string) error {
+	// Calculate statistics from all groups
+	passed := 0
+	failed := 0
+	skipped := 0
+	totalDuration := time.Duration(0)
+	allResults := make([]workflow.TestResult, 0)
+
+	for _, group := range groups {
+		for _, result := range group.Results {
+			allResults = append(allResults, result)
+			if result.Status == "passed" {
+				passed++
+			} else if result.Status == "failed" {
+				failed++
+			} else if result.Status == "skipped" {
+				skipped++
+			}
+			totalDuration += result.Duration
+		}
+	}
+
+	total := len(allResults)
+	successRate := 0.0
+	if total > 0 {
+		successRate = float64(passed) / float64(total) * 100
+	}
+
+	// Prepare data
+	data := HTMLReportData{
+		Title:         "Stepwise Test Report",
+		GeneratedAt:   time.Now().Format("2006-01-02 15:04:05"),
+		WorkflowName:  workflowName,
+		TotalTests:    total,
+		PassedTests:   passed,
+		FailedTests:   failed,
+		SkippedTests:  skipped,
+		TotalDuration: totalDuration,
+		SuccessRate:   successRate,
+		Results:       allResults,
+		Groups:        groups,
+		IsGrouped:     true,
 	}
 
 	// Generate HTML
@@ -212,6 +295,54 @@ func generateHTML(data HTMLReportData) (string, error) {
             font-weight: 600;
             margin-bottom: 20px;
             color: #333;
+        }
+        
+        .workflow-group {
+            margin-bottom: 40px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #f8f9fa;
+        }
+        
+        .workflow-group-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.3s;
+        }
+        
+        .workflow-group-header:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+        
+        .workflow-group-title {
+            font-size: 1.3em;
+            font-weight: 600;
+        }
+        
+        .workflow-group-subtitle {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+        
+        .workflow-group-stats {
+            text-align: right;
+            font-size: 0.9em;
+        }
+        
+        .workflow-group-content {
+            padding: 20px;
+            background: white;
+        }
+        
+        .workflow-group-collapsed .workflow-group-content {
+            display: none;
         }
         
         .test-result {
@@ -488,6 +619,107 @@ func generateHTML(data HTMLReportData) (string, error) {
         
         <div class="results">
             <div class="results-header">Test Results</div>
+            {{if .IsGrouped}}
+            {{range $groupIndex, $group := .Groups}}
+            <div class="workflow-group" id="group-{{$groupIndex}}">
+                <div class="workflow-group-header" onclick="toggleGroup({{$groupIndex}})">
+                    <div>
+                        <div class="workflow-group-title">
+                            {{if $group.WorkflowName}}{{$group.WorkflowName}}{{else}}{{$group.FileName}}{{end}}
+                        </div>
+                        <div class="workflow-group-subtitle">{{$group.FileName}}</div>
+                    </div>
+                    <div class="workflow-group-stats">
+                        <div>Tests: {{len $group.Results}}</div>
+                        <span class="expand-icon">▼</span>
+                    </div>
+                </div>
+                <div class="workflow-group-content">
+                    {{range $resultIndex, $result := $group.Results}}
+                    {{$globalIndex := (add (mul $groupIndex 1000) $resultIndex)}}
+                    <div class="test-result {{$result.Status}}" onclick="toggleDetails({{$globalIndex}})">
+                        <div class="test-header">
+                            <div class="test-name">{{$result.Name}}</div>
+                            <div class="test-status">
+                                <span class="status-badge {{$result.Status}}">{{$result.Status}}</span>
+                                <span class="test-duration">{{formatDuration $result.Duration}}</span>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                        </div>
+                        <div class="test-details" id="details-{{$globalIndex}}">
+                    {{if $result.Error}}
+                    <div class="detail-section">
+                        <h4>Error</h4>
+                        <div class="error-message">{{$result.Error}}</div>
+                    </div>
+                    {{end}}
+                    
+                    {{if $result.PrintText}}
+                    <div class="detail-section">
+                        <h4>Print Output</h4>
+                        <div class="print-text">{{$result.PrintText}}</div>
+                    </div>
+                    {{end}}
+                    
+                    {{if $result.Validations}}
+                    <div class="detail-section">
+                        <h4>Validations ({{len $result.Validations}})</h4>
+                        <div class="validations">
+                            {{range $result.Validations}}
+                            <div class="validation {{if .Passed}}passed{{else}}failed{{end}}">
+                                <span class="validation-icon">{{if .Passed}}✓{{else}}✗{{end}}</span>
+                                <div class="validation-details">
+                                    <div class="validation-type">{{.Type}}</div>
+                                    <div class="validation-expected">
+                                        Expected: {{formatValue .Expected}} | Actual: {{formatValue .Actual}}
+                                        {{if .Error}}<br><strong>Error:</strong> {{.Error}}{{end}}
+                                    </div>
+                                </div>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+                    
+                    {{if $result.CapturedData}}
+                    <div class="detail-section">
+                        <h4>Captured Data</h4>
+                        <div class="captured-data">
+                            <pre>{{formatJSON $result.CapturedData}}</pre>
+                        </div>
+                    </div>
+                    {{end}}
+                    
+                    {{if $result.RepeatCount}}
+                    <div class="detail-section">
+                        <h4>Repeat Results ({{$result.RepeatCount}} iterations)</h4>
+                        <div class="repeat-results">
+                            {{range $i, $repeatResult := $result.RepeatResults}}
+                            <div class="repeat-iteration">
+                                <strong>Iteration {{add $i 1}}:</strong> 
+                                <span class="status-badge {{$repeatResult.Status}}">{{$repeatResult.Status}}</span>
+                                <span class="test-duration">{{formatDuration $repeatResult.Duration}}</span>
+                                {{if $repeatResult.Error}}
+                                <div class="error-message" style="margin-top: 10px;">{{$repeatResult.Error}}</div>
+                                {{end}}
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+                    
+                    {{if $result.Retries}}
+                    <div class="detail-section">
+                        <h4>Retries</h4>
+                        <div>This test was retried {{$result.Retries}} time(s)</div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+                </div>
+            </div>
+            {{else}}
             {{range $index, $result := .Results}}
             <div class="test-result {{$result.Status}}" onclick="toggleDetails({{$index}})">
                 <div class="test-header">
@@ -569,6 +801,7 @@ func generateHTML(data HTMLReportData) (string, error) {
                 </div>
             </div>
             {{end}}
+            {{end}}
         </div>
         
         <div class="footer">
@@ -579,9 +812,18 @@ func generateHTML(data HTMLReportData) (string, error) {
     <script>
         function toggleDetails(index) {
             const details = document.getElementById('details-' + index);
-            const testResult = details.closest('.test-result');
-            details.classList.toggle('expanded');
-            testResult.classList.toggle('expanded');
+            if (details) {
+                const testResult = details.closest('.test-result');
+                details.classList.toggle('expanded');
+                testResult.classList.toggle('expanded');
+            }
+        }
+        
+        function toggleGroup(groupIndex) {
+            const group = document.getElementById('group-' + groupIndex);
+            if (group) {
+                group.classList.toggle('workflow-group-collapsed');
+            }
         }
     </script>
 </body>
@@ -630,6 +872,9 @@ func generateHTML(data HTMLReportData) (string, error) {
 		},
 		"add": func(a, b int) int {
 			return a + b
+		},
+		"mul": func(a, b int) int {
+			return a * b
 		},
 		"geFloat": func(a, b float64) bool {
 			return a >= b

@@ -302,6 +302,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 	totalPassed := 0
 	totalFailed := 0
 	totalDuration := 0
+	workflowGroups := make([]report.WorkflowGroup, 0)
 
 	for rres := range resultsCh {
 		// Even if there was an error loading the workflow, we still want to include
@@ -328,6 +329,15 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 			}
 			totalDuration += int(result.Duration.Milliseconds())
 		}
+
+		// Add to workflow groups for grouped HTML report
+		if len(rres.results) > 0 {
+			workflowGroups = append(workflowGroups, report.WorkflowGroup{
+				FileName:     filepath.Base(rres.file),
+				WorkflowName: rres.workflowName,
+				Results:      rres.results,
+			})
+		}
 	}
 
 	// In verbose mode, print processing completion
@@ -346,7 +356,8 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 		}
 
 		workflowName := fmt.Sprintf("Multiple Workflows (%d files)", len(workflowFiles))
-		if err := report.GenerateHTMLReport(totalResults, workflowName, path, reportPath); err != nil {
+		// Use grouped report for multiple files
+		if err := report.GenerateHTMLReportFromGroups(workflowGroups, workflowName, reportPath); err != nil {
 			fmt.Printf("%s %s: %v\n", r.colors.Yellow("[WARNING]"), r.colors.Yellow("Failed to generate HTML report"), err)
 		} else {
 			fmt.Printf("%s %s\n", r.colors.Green("[INFO]"), r.colors.Green(fmt.Sprintf("HTML report generated: %s", reportPath)))
