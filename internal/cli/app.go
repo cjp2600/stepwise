@@ -14,6 +14,7 @@ import (
 	"github.com/cjp2600/stepwise/internal/ai"
 	"github.com/cjp2600/stepwise/internal/config"
 	"github.com/cjp2600/stepwise/internal/logger"
+	"github.com/cjp2600/stepwise/internal/report"
 	"github.com/cjp2600/stepwise/internal/workflow"
 )
 
@@ -129,6 +130,8 @@ func (a *App) handleRun(args []string) error {
 	recursive := fs.BoolP("recursive", "r", false, "Search recursively in subdirectories")
 	verbose := fs.BoolP("verbose", "v", false, "Enable verbose logging")
 	failFast := fs.BoolP("fail-fast", "f", false, "Stop execution on first test failure")
+	htmlReportEnabled := fs.Bool("html-report", false, "Generate HTML report (default: test-report_TIMESTAMP.html)")
+	htmlReportPath := fs.String("html-report-path", "", "Path for HTML report file (used with --html-report)")
 	_ = fs.Parse(args)
 
 	// Find the first non-flag argument as the path
@@ -161,7 +164,14 @@ func (a *App) handleRun(args []string) error {
 	if info.IsDir() {
 		runner := NewWorkflowRunner(a.config, a.logger)
 		runner.SetFailFast(*failFast)
-		return runner.RunWorkflows(path, *parallelism, *recursive)
+		err := runner.RunWorkflows(path, *parallelism, *recursive, *htmlReportEnabled, *htmlReportPath)
+
+		// Generate HTML report if requested (for directory runs, report is generated inside RunWorkflows)
+		if *htmlReportEnabled && err == nil {
+			// Report is already generated in RunWorkflows
+		}
+
+		return err
 	} else {
 		spinner := NewSpinner(a.colors, "Loading workflow...")
 
@@ -233,6 +243,27 @@ func (a *App) handleRun(args []string) error {
 
 		// Workflow completion is now shown by progress reporter
 		hasFailures := a.printResults(results)
+
+		// Generate HTML report if requested
+		if *htmlReportEnabled {
+			reportPath := *htmlReportPath
+
+			workflowName := wf.Name
+			if workflowName == "" {
+				workflowName = filepath.Base(path)
+			}
+
+			if err := a.generateHTMLReport(results, workflowName, path, reportPath); err != nil {
+				fmt.Printf("%s %s: %v\n", a.colors.Yellow("[WARNING]"), a.colors.Yellow("Failed to generate HTML report"), err)
+			} else {
+				if reportPath == "" {
+					timestamp := time.Now().Format("20060102_150405")
+					reportPath = fmt.Sprintf("test-report_%s.html", timestamp)
+				}
+				fmt.Printf("%s %s\n", a.colors.Green("[INFO]"), a.colors.Green(fmt.Sprintf("HTML report generated: %s", reportPath)))
+			}
+		}
+
 		if hasFailures {
 			return fmt.Errorf("workflow execution completed with failures")
 		}
@@ -379,6 +410,8 @@ func (a *App) showHelp() error {
 	fmt.Printf("  %s    %s\n", a.colors.Cyan("--recursive, -r"), "Search recursively in subdirectories")
 	fmt.Printf("  %s    %s\n", a.colors.Cyan("--verbose, -v"), "Enable verbose logging (shows detailed logs in real-time)")
 	fmt.Printf("  %s    %s\n", a.colors.Cyan("--fail-fast, -f"), "Stop execution on first test failure")
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--html-report"), "Generate HTML report (default: test-report_TIMESTAMP.html)")
+	fmt.Printf("  %s    %s\n", a.colors.Cyan("--html-report-path"), "Path for HTML report file (used with --html-report)")
 
 	fmt.Printf("\n%s\n", a.colors.Bold("WORKFLOW FILES:"))
 	fmt.Printf("  Stepwise supports YAML workflow files with the following features:\n")
@@ -507,4 +540,9 @@ func (a *App) printWorkflowInfo(wf *workflow.Workflow) {
 			fmt.Printf("  %s: %v\n", key, value)
 		}
 	}
+}
+
+// generateHTMLReport generates an HTML report from test results
+func (a *App) generateHTMLReport(results []workflow.TestResult, workflowName string, workflowFile string, outputPath string) error {
+	return report.GenerateHTMLReport(results, workflowName, workflowFile, outputPath)
 }

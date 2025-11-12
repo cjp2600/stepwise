@@ -11,6 +11,7 @@ import (
 
 	"github.com/cjp2600/stepwise/internal/config"
 	"github.com/cjp2600/stepwise/internal/logger"
+	"github.com/cjp2600/stepwise/internal/report"
 	"github.com/cjp2600/stepwise/internal/workflow"
 )
 
@@ -47,7 +48,7 @@ func (r *WorkflowRunner) SetFailFast(failFast bool) {
 }
 
 // RunWorkflows runs all workflow files in the given path
-func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bool) error {
+func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bool, htmlReportEnabled bool, htmlReportPath string) error {
 	if !r.verbose {
 		fmt.Println("Loading workflow...")
 	} else {
@@ -325,6 +326,22 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 	}
 
 	r.printSummary(len(workflowFiles), totalPassed, totalFailed, totalDuration)
+
+	// Generate HTML report if requested
+	if htmlReportEnabled {
+		reportPath := htmlReportPath
+		if reportPath == "" {
+			timestamp := time.Now().Format("20060102_150405")
+			reportPath = fmt.Sprintf("test-report_%s.html", timestamp)
+		}
+
+		workflowName := fmt.Sprintf("Multiple Workflows (%d files)", len(workflowFiles))
+		if err := report.GenerateHTMLReport(totalResults, workflowName, path, reportPath); err != nil {
+			fmt.Printf("%s %s: %v\n", r.colors.Yellow("[WARNING]"), r.colors.Yellow("Failed to generate HTML report"), err)
+		} else {
+			fmt.Printf("%s %s\n", r.colors.Green("[INFO]"), r.colors.Green(fmt.Sprintf("HTML report generated: %s", reportPath)))
+		}
+	}
 
 	if totalFailed > 0 {
 		return fmt.Errorf("workflow execution completed with %d failures", totalFailed)
