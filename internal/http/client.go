@@ -70,12 +70,17 @@ func NewClient(timeout time.Duration, log *logger.Logger) *Client {
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: false, // Set to true for self-signed certificates
 		},
-		MaxIdleConns:        100,              // Maximum number of idle connections
-		MaxIdleConnsPerHost: 10,               // Maximum number of idle connections per host
-		IdleConnTimeout:     90 * time.Second, // Timeout for idle connections
-		DisableKeepAlives:   false,            // Keep connections alive for reuse
-		DisableCompression:  false,            // Enable compression
-		ForceAttemptHTTP2:   true,             // Attempt HTTP/2
+		MaxIdleConns:          100,              // Maximum number of idle connections
+		MaxIdleConnsPerHost:   10,               // Maximum number of idle connections per host
+		IdleConnTimeout:       30 * time.Second, // Reduced timeout for idle connections (was 90s)
+		DisableKeepAlives:     false,            // Keep connections alive for reuse
+		DisableCompression:    false,            // Enable compression
+		ForceAttemptHTTP2:     true,             // Attempt HTTP/2
+		MaxConnsPerHost:       20,               // Limit total connections per host (including HTTP/2)
+		WriteBufferSize:       4096,             // Write buffer size
+		ReadBufferSize:        4096,             // Read buffer size
+		ResponseHeaderTimeout: 30 * time.Second, // Timeout for reading response headers
+		ExpectContinueTimeout: 1 * time.Second,  // Timeout for Expect: 100-continue
 	}
 
 	return &Client{
@@ -151,7 +156,11 @@ func (c *Client) Execute(req *Request) (*Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Ensure response body is fully consumed and closed
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
