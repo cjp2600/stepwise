@@ -548,6 +548,29 @@ func (r *WorkflowRunner) printWorkflowResults(filePath string, workflowName stri
 		duration)
 }
 
+// printPollSummary prints a summary of polling attempts
+func (r *WorkflowRunner) printPollSummary(attempts int, success bool) {
+	icon := r.colors.Green("✓")
+	statusText := r.colors.Green("succeeded")
+	if !success {
+		icon = r.colors.Red("✗")
+		statusText = r.colors.Red("failed")
+	}
+
+	attemptWord := "attempt"
+	if attempts != 1 {
+		attemptWord = "attempts"
+	}
+
+	// Красивое саммари поллинга
+	fmt.Printf("  %s %s %s %s %s\n",
+		r.colors.Cyan("⟳"),
+		r.colors.Dim("Polling:"),
+		icon,
+		r.colors.Bold(r.colors.Cyan(fmt.Sprintf("%d %s", attempts, attemptWord))),
+		statusText)
+}
+
 // printRepeatResults prints results for a repeated step
 func (r *WorkflowRunner) printRepeatResults(result workflow.TestResult) {
 	fmt.Printf("%s %s (repeat: %d iterations)\n",

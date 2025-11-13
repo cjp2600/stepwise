@@ -66,14 +66,22 @@ type Response struct {
 
 // NewClient creates a new HTTP client
 func NewClient(timeout time.Duration, log *logger.Logger) *Client {
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false, // Set to true for self-signed certificates
+		},
+		MaxIdleConns:        100,              // Maximum number of idle connections
+		MaxIdleConnsPerHost: 10,               // Maximum number of idle connections per host
+		IdleConnTimeout:     90 * time.Second, // Timeout for idle connections
+		DisableKeepAlives:   false,            // Keep connections alive for reuse
+		DisableCompression:  false,            // Enable compression
+		ForceAttemptHTTP2:   true,             // Attempt HTTP/2
+	}
+
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: timeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: false, // Set to true for self-signed certificates
-				},
-			},
+			Timeout:   timeout,
+			Transport: transport,
 		},
 		logger: log,
 	}

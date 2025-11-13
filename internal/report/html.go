@@ -530,6 +530,39 @@ func generateHTML(data HTMLReportData) (string, error) {
             white-space: pre-wrap;
         }
         
+        .polling-summary {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #17a2b8;
+        }
+        
+        .polling-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.05em;
+        }
+        
+        .polling-icon {
+            font-size: 1.3em;
+            color: #17a2b8;
+        }
+        
+        .polling-text {
+            color: #333;
+        }
+        
+        .polling-success {
+            color: #28a745;
+            font-weight: 600;
+        }
+        
+        .polling-failed {
+            color: #dc3545;
+            font-weight: 600;
+        }
+        
         .repeat-results {
             margin-top: 15px;
         }
@@ -661,6 +694,21 @@ func generateHTML(data HTMLReportData) (string, error) {
                             </div>
                             {{end}}
                             
+                            {{if $result.PollAttempts}}
+                            <div class="detail-section">
+                                <h4>Polling Summary</h4>
+                                <div class="polling-summary">
+                                    <div class="polling-info">
+                                        <span class="polling-icon">⟳</span>
+                                        <span class="polling-text">
+                                            <strong>{{$result.PollAttempts}}</strong> {{if eq $result.PollAttempts 1}}attempt{{else}}attempts{{end}} 
+                                            {{if eq $result.Status "passed"}}<span class="polling-success">succeeded</span>{{else}}<span class="polling-failed">failed</span>{{end}}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            {{end}}
+                            
                             {{if $result.Validations}}
                             <div class="detail-section">
                                 <h4>Validations ({{len $result.Validations}})</h4>
@@ -743,6 +791,21 @@ func generateHTML(data HTMLReportData) (string, error) {
                     <div class="detail-section">
                         <h4>Print Output</h4>
                         <div class="print-text">{{$result.PrintText}}</div>
+                    </div>
+                    {{end}}
+                    
+                    {{if $result.PollAttempts}}
+                    <div class="detail-section">
+                        <h4>Polling Summary</h4>
+                        <div class="polling-summary">
+                            <div class="polling-info">
+                                <span class="polling-icon">⟳</span>
+                                <span class="polling-text">
+                                    <strong>{{$result.PollAttempts}}</strong> {{if eq $result.PollAttempts 1}}attempt{{else}}attempts{{end}} 
+                                    {{if eq $result.Status "passed"}}<span class="polling-success">succeeded</span>{{else}}<span class="polling-failed">failed</span>{{end}}
+                                </span>
+                            </div>
+                        </div>
                     </div>
                     {{end}}
                     

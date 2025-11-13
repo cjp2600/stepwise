@@ -123,7 +123,8 @@ type TestResult struct {
 	Retries       int                           `json:"retries,omitempty"`
 	RepeatResults []TestResult                  `json:"repeat_results,omitempty"`
 	RepeatCount   int                           `json:"repeat_count,omitempty"`
-	PrintText     string                        `json:"print_text,omitempty"` // Текст print для отчёта
+	PrintText     string                        `json:"print_text,omitempty"`    // Текст print для отчёта
+	PollAttempts  int                           `json:"poll_attempts,omitempty"` // Количество попыток поллинга
 }
 
 // GroupResult represents the result of a step group
@@ -979,7 +980,15 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 
 		if allConditionsMet {
 			// Success! All polling conditions are met
-			e.logger.Info("Polling condition met", "step", step.Name, "attempt", attempt)
+			result.PollAttempts = attempt
+			e.logger.Info("Polling condition met", "step", step.Name, "attempt", attempt, "total_attempts", attempt)
+
+			// Выводим красивое саммари поллинга
+			attemptWord := "attempt"
+			if attempt != 1 {
+				attemptWord = "attempts"
+			}
+			fmt.Printf("  ⟳ Polling: ✓ %d %s succeeded\n", attempt, attemptWord)
 
 			// Capture values if specified
 			if step.Capture != nil {
@@ -1031,7 +1040,15 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 	}
 
 	// All attempts exhausted, condition not met
+	result.PollAttempts = maxAttempts
 	result.Duration = time.Since(startTime)
+
+	// Выводим саммари поллинга при неудаче
+	attemptWord := "attempts"
+	if maxAttempts == 1 {
+		attemptWord = "attempt"
+	}
+	fmt.Printf("  ⟳ Polling: ✗ %d %s failed\n", maxAttempts, attemptWord)
 	if lastError != nil {
 		return fmt.Errorf("polling failed after %d attempts: %w", maxAttempts, lastError)
 	}
