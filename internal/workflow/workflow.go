@@ -983,13 +983,6 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			result.PollAttempts = attempt
 			e.logger.Info("Polling condition met", "step", step.Name, "attempt", attempt, "total_attempts", attempt)
 
-			// Выводим красивое саммари поллинга
-			attemptWord := "attempt"
-			if attempt != 1 {
-				attemptWord = "attempts"
-			}
-			fmt.Printf("  ⟳ Polling: ✓ %d %s succeeded\n", attempt, attemptWord)
-
 			// Capture values if specified
 			if step.Capture != nil {
 				var captureErr error
@@ -1042,13 +1035,6 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 	// All attempts exhausted, condition not met
 	result.PollAttempts = maxAttempts
 	result.Duration = time.Since(startTime)
-
-	// Выводим саммари поллинга при неудаче
-	attemptWord := "attempts"
-	if maxAttempts == 1 {
-		attemptWord = "attempt"
-	}
-	fmt.Printf("  ⟳ Polling: ✗ %d %s failed\n", maxAttempts, attemptWord)
 	if lastError != nil {
 		return fmt.Errorf("polling failed after %d attempts: %w", maxAttempts, lastError)
 	}
