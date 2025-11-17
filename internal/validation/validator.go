@@ -741,7 +741,8 @@ func (v *Validator) filterArray(arrayData []interface{}, filter string) (interfa
 		field = strings.TrimSpace(filter)
 	}
 
-	// Find first matching element
+	// Find all matching elements
+	var matchedItems []interface{}
 	for _, item := range arrayData {
 		mapItem, ok := item.(map[string]interface{})
 		if !ok {
@@ -764,11 +765,22 @@ func (v *Validator) filterArray(arrayData []interface{}, filter string) (interfa
 		}
 
 		if matched {
-			return item, nil
+			matchedItems = append(matchedItems, item)
 		}
 	}
 
-	return nil, fmt.Errorf("no matching element found in array for filter: %s", filter)
+	// Return array of all matches, or error if none found
+	if len(matchedItems) == 0 {
+		return nil, fmt.Errorf("no matching element found in array for filter: %s", filter)
+	}
+
+	// If only one match, return it directly (for backward compatibility)
+	// If multiple matches, return array to support subsequent field extraction like [?(...)].name
+	if len(matchedItems) == 1 {
+		return matchedItems[0], nil
+	}
+
+	return matchedItems, nil
 }
 
 // extractFieldValue extracts a field value, supporting dot notation

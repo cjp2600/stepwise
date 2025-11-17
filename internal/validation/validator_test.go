@@ -382,61 +382,79 @@ func TestExtractJSONValueWithFilters(t *testing.T) {
 		expected interface{}
 		wantErr  bool
 	}{
-		// Filter by string equality
+		// Filter by string equality - single match (returns object, not array)
 		{
 			name:     "Filter by name",
 			path:     `$.users[?(@.name == "Bob")]`,
 			expected: map[string]interface{}{"id": float64(2), "name": "Bob", "age": float64(30), "active": false},
 			wantErr:  false,
 		},
-		// Filter by numeric equality
+		// Filter by numeric equality - single match (returns object, not array)
 		{
 			name:     "Filter by id",
 			path:     `$.users[?(@.id == 3)]`,
 			expected: map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
 			wantErr:  false,
 		},
-		// Filter by boolean field
+		// Filter by boolean field - multiple matches
 		{
 			name:     "Filter by active boolean",
 			path:     `$.users[?(@.active)]`,
-			expected: map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
-			wantErr:  false,
+			expected: []interface{}{
+				map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
+				map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
+				map[string]interface{}{"id": float64(4), "name": "Diana", "age": float64(28), "active": true},
+			},
+			wantErr: false,
 		},
-		// Filter by boolean equality
+		// Filter by boolean equality - multiple matches
 		{
 			name:     "Filter by active == true",
 			path:     `$.users[?(@.active == true)]`,
-			expected: map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
-			wantErr:  false,
+			expected: []interface{}{
+				map[string]interface{}{"id": float64(1), "name": "Alice", "age": float64(25), "active": true},
+				map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
+				map[string]interface{}{"id": float64(4), "name": "Diana", "age": float64(28), "active": true},
+			},
+			wantErr: false,
 		},
-		// Filter by greater than
+		// Filter by greater than - single match (returns object, not array)
 		{
 			name:     "Filter by age > 30",
 			path:     `$.users[?(@.age > 30)]`,
 			expected: map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
 			wantErr:  false,
 		},
-		// Filter by less than
+		// Filter by less than - multiple matches
 		{
 			name:     "Filter by price < 100",
 			path:     `$.products[?(@.price < 100)]`,
-			expected: map[string]interface{}{"id": float64(101), "price": float64(50), "name": "Widget"},
-			wantErr:  false,
+			expected: []interface{}{
+				map[string]interface{}{"id": float64(101), "price": float64(50), "name": "Widget"},
+				map[string]interface{}{"id": float64(103), "price": float64(75), "name": "Tool"},
+			},
+			wantErr: false,
 		},
-		// Filter by greater or equal
+		// Filter by greater or equal - multiple matches
 		{
 			name:     "Filter by price >= 75",
 			path:     `$.products[?(@.price >= 75)]`,
-			expected: map[string]interface{}{"id": float64(102), "price": float64(150), "name": "Gadget"},
-			wantErr:  false,
+			expected: []interface{}{
+				map[string]interface{}{"id": float64(102), "price": float64(150), "name": "Gadget"},
+				map[string]interface{}{"id": float64(103), "price": float64(75), "name": "Tool"},
+			},
+			wantErr: false,
 		},
-		// Filter by not equal
+		// Filter by not equal - multiple matches
 		{
 			name:     "Filter by name != Alice",
 			path:     `$.users[?(@.name != "Alice")]`,
-			expected: map[string]interface{}{"id": float64(2), "name": "Bob", "age": float64(30), "active": false},
-			wantErr:  false,
+			expected: []interface{}{
+				map[string]interface{}{"id": float64(2), "name": "Bob", "age": float64(30), "active": false},
+				map[string]interface{}{"id": float64(3), "name": "Charlie", "age": float64(35), "active": true},
+				map[string]interface{}{"id": float64(4), "name": "Diana", "age": float64(28), "active": true},
+			},
+			wantErr: false,
 		},
 		// Last element
 		{
@@ -553,39 +571,61 @@ func TestExtractJSONValueWithNestedFilters(t *testing.T) {
 	var jsonData interface{}
 	json.Unmarshal(jsonBytes, &jsonData)
 
-	// Test filter with nested field
+	// Test filter with nested field - multiple matches
 	value, err := validator.extractJSONValue(jsonData, `$.orders[?(@.customer.vip == true)]`)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 		return
 	}
 
-	// Should return first VIP customer order
-	orderMap, ok := value.(map[string]interface{})
+	// Should return array of VIP customer orders
+	ordersArray, ok := value.([]interface{})
 	if !ok {
-		t.Errorf("Expected map, got %T", value)
+		t.Errorf("Expected array, got %T", value)
 		return
 	}
 
-	if orderMap["id"].(float64) != 1 {
-		t.Errorf("Expected order id 1, got %v", orderMap["id"])
+	if len(ordersArray) != 2 {
+		t.Errorf("Expected 2 orders, got %d", len(ordersArray))
+		return
 	}
 
-	// Test filter with nested field and greater than
+	// Check first order
+	orderMap, ok := ordersArray[0].(map[string]interface{})
+	if !ok {
+		t.Errorf("Expected map, got %T", ordersArray[0])
+		return
+	}
+	if orderMap["id"].(float64) != 1 {
+		t.Errorf("Expected first order id 1, got %v", orderMap["id"])
+	}
+
+	// Test filter with nested field and greater than - multiple matches
 	value, err = validator.extractJSONValue(jsonData, `$.orders[?(@.total > 100)]`)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 		return
 	}
 
-	orderMap, ok = value.(map[string]interface{})
+	ordersArray, ok = value.([]interface{})
 	if !ok {
-		t.Errorf("Expected map, got %T", value)
+		t.Errorf("Expected array, got %T", value)
 		return
 	}
 
+	if len(ordersArray) != 2 {
+		t.Errorf("Expected 2 orders, got %d", len(ordersArray))
+		return
+	}
+
+	// Check first order
+	orderMap, ok = ordersArray[0].(map[string]interface{})
+	if !ok {
+		t.Errorf("Expected map, got %T", ordersArray[0])
+		return
+	}
 	if orderMap["id"].(float64) != 1 {
-		t.Errorf("Expected order id 1, got %v", orderMap["id"])
+		t.Errorf("Expected first order id 1, got %v", orderMap["id"])
 	}
 }
 
@@ -627,8 +667,66 @@ func TestExtractJSONValueFilterAndAccess(t *testing.T) {
 		return
 	}
 
+	// Фильтр с одним совпадением возвращает объект, поэтому результат - строка
 	if value != "Los Angeles" {
 		t.Errorf("Expected 'Los Angeles', got %v", value)
+	}
+}
+
+func TestExtractJSONValueFilterMultipleMatches(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	// Test data with multiple matches
+	data := map[string]interface{}{
+		"experiments": []interface{}{
+			map[string]interface{}{"id": 1, "name": "Experiment A", "value": "test"},
+			map[string]interface{}{"id": 2, "name": "Experiment B", "value": "prod"},
+			map[string]interface{}{"id": 3, "name": "Experiment C", "value": "test"},
+			map[string]interface{}{"id": 4, "name": "Experiment D", "value": "test"},
+		},
+	}
+
+	// Convert to JSON and back
+	jsonBytes, _ := json.Marshal(data)
+	var jsonData interface{}
+	json.Unmarshal(jsonBytes, &jsonData)
+
+	// Test filter with multiple matches - should return array of names
+	value, err := validator.extractJSONValue(jsonData, `$.experiments[?(@.value == "test")].name`)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	namesArray, ok := value.([]interface{})
+	if !ok {
+		t.Errorf("Expected array, got %T: %v", value, value)
+		return
+	}
+
+	if len(namesArray) != 3 {
+		t.Errorf("Expected 3 names, got %d: %v", len(namesArray), namesArray)
+		return
+	}
+
+	expectedNames := []string{"Experiment A", "Experiment C", "Experiment D"}
+	for i, name := range namesArray {
+		if name != expectedNames[i] {
+			t.Errorf("Expected name[%d] = %s, got %v", i, expectedNames[i], name)
+		}
+	}
+
+	// Test filter with single match - should return value, not array
+	value, err = validator.extractJSONValue(jsonData, `$.experiments[?(@.value == "prod")].name`)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	// Single match should return string, not array
+	if value != "Experiment B" {
+		t.Errorf("Expected 'Experiment B', got %v", value)
 	}
 }
 
@@ -813,13 +911,13 @@ func TestExtractJSONValueAllPatterns(t *testing.T) {
 		
 		// Object array access
 		{"Object array index", "$.objects[0].name", "First", false},
-		{"Object array filter", "$.objects[?(@.id == 2)].name", "Second", false},
+		{"Object array filter single", "$.objects[?(@.id == 2)].name", "Second", false},
 		{"Object array wildcard with field", "$.objects[*].name", []interface{}{"First", "Second", "Third"}, false},
 		{"Object array wildcard with nested", "$.objects[*].id", []interface{}{float64(1), float64(2), float64(3)}, false},
 		
-		// Filter patterns
+		// Filter patterns - single match returns value, multiple matches return array
 		{"Filter by id", "$.objects[?(@.id == 1)].name", "First", false},
-		{"Filter by active", "$.objects[?(@.active == true)].name", "First", false},
+		{"Filter by active", "$.objects[?(@.active == true)].name", []interface{}{"First", "Third"}, false},
 		{"Filter by name", "$.objects[?(@.name == \"Second\")].id", float64(2), false},
 	}
 
