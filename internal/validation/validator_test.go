@@ -632,5 +632,240 @@ func TestExtractJSONValueFilterAndAccess(t *testing.T) {
 	}
 }
 
+func TestExtractJSONValueWildcardWithField(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	// Test data with experiments array
+	data := map[string]interface{}{
+		"experiments": []interface{}{
+			map[string]interface{}{"id": 1, "name": "Experiment A", "status": "active"},
+			map[string]interface{}{"id": 2, "name": "Experiment B", "status": "inactive"},
+			map[string]interface{}{"id": 3, "name": "Experiment C", "status": "active"},
+		},
+		"users": []interface{}{
+			map[string]interface{}{"id": 1, "name": "Alice", "email": "alice@example.com"},
+			map[string]interface{}{"id": 2, "name": "Bob", "email": "bob@example.com"},
+		},
+		"nested": map[string]interface{}{
+			"items": []interface{}{
+				map[string]interface{}{"id": 10, "value": "Value 1"},
+				map[string]interface{}{"id": 20, "value": "Value 2"},
+			},
+		},
+	}
+
+	// Convert to JSON and back
+	jsonBytes, _ := json.Marshal(data)
+	var jsonData interface{}
+	json.Unmarshal(jsonBytes, &jsonData)
+
+	// Test $.experiments[*].name - should return array of names
+	value, err := validator.extractJSONValue(jsonData, "$.experiments[*].name")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	namesArray, ok := value.([]interface{})
+	if !ok {
+		t.Errorf("Expected array, got %T", value)
+		return
+	}
+
+	if len(namesArray) != 3 {
+		t.Errorf("Expected 3 names, got %d", len(namesArray))
+		return
+	}
+
+	expectedNames := []string{"Experiment A", "Experiment B", "Experiment C"}
+	for i, name := range namesArray {
+		if name != expectedNames[i] {
+			t.Errorf("Expected name[%d] = %s, got %v", i, expectedNames[i], name)
+		}
+	}
+
+	// Test $.users[*].email - should return array of emails
+	value, err = validator.extractJSONValue(jsonData, "$.users[*].email")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	emailsArray, ok := value.([]interface{})
+	if !ok {
+		t.Errorf("Expected array, got %T", value)
+		return
+	}
+
+	if len(emailsArray) != 2 {
+		t.Errorf("Expected 2 emails, got %d", len(emailsArray))
+		return
+	}
+
+	expectedEmails := []string{"alice@example.com", "bob@example.com"}
+	for i, email := range emailsArray {
+		if email != expectedEmails[i] {
+			t.Errorf("Expected email[%d] = %s, got %v", i, expectedEmails[i], email)
+		}
+	}
+
+	// Test nested array with wildcard: $.nested.items[*].value
+	value, err = validator.extractJSONValue(jsonData, "$.nested.items[*].value")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	valuesArray, ok := value.([]interface{})
+	if !ok {
+		t.Errorf("Expected array, got %T", value)
+		return
+	}
+
+	if len(valuesArray) != 2 {
+		t.Errorf("Expected 2 values, got %d", len(valuesArray))
+		return
+	}
+
+	expectedValues := []string{"Value 1", "Value 2"}
+	for i, val := range valuesArray {
+		if val != expectedValues[i] {
+			t.Errorf("Expected value[%d] = %s, got %v", i, expectedValues[i], val)
+		}
+	}
+
+	// Test root array with wildcard: $[*].field
+	rootArrayData := []interface{}{
+		map[string]interface{}{"id": 1, "name": "Item 1"},
+		map[string]interface{}{"id": 2, "name": "Item 2"},
+		map[string]interface{}{"id": 3, "name": "Item 3"},
+	}
+	jsonBytes, _ = json.Marshal(rootArrayData)
+	var rootArrayJSON interface{}
+	json.Unmarshal(jsonBytes, &rootArrayJSON)
+
+	value, err = validator.extractJSONValue(rootArrayJSON, "$[*].name")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+		return
+	}
+
+	namesArray, ok = value.([]interface{})
+	if !ok {
+		t.Errorf("Expected array, got %T", value)
+		return
+	}
+
+	if len(namesArray) != 3 {
+		t.Errorf("Expected 3 names, got %d", len(namesArray))
+		return
+	}
+
+	expectedRootNames := []string{"Item 1", "Item 2", "Item 3"}
+	for i, name := range namesArray {
+		if name != expectedRootNames[i] {
+			t.Errorf("Expected name[%d] = %s, got %v", i, expectedRootNames[i], name)
+		}
+	}
+}
+
+func TestExtractJSONValueAllPatterns(t *testing.T) {
+	log := logger.New()
+	validator := NewValidator(log)
+
+	// Comprehensive test data
+	data := map[string]interface{}{
+		"simple": "value",
+		"nested": map[string]interface{}{
+			"field": "nested_value",
+			"deep": map[string]interface{}{
+				"field": "deep_value",
+			},
+		},
+		"array": []interface{}{"a", "b", "c"},
+		"objects": []interface{}{
+			map[string]interface{}{"id": 1, "name": "First", "active": true},
+			map[string]interface{}{"id": 2, "name": "Second", "active": false},
+			map[string]interface{}{"id": 3, "name": "Third", "active": true},
+		},
+	}
+
+	jsonBytes, _ := json.Marshal(data)
+	var jsonData interface{}
+	json.Unmarshal(jsonBytes, &jsonData)
+
+	tests := []struct {
+		name     string
+		path     string
+		expected interface{}
+		wantErr  bool
+	}{
+		// Simple paths
+		{"Simple field", "$.simple", "value", false},
+		{"Nested field", "$.nested.field", "nested_value", false},
+		{"Deep nested", "$.nested.deep.field", "deep_value", false},
+		
+		// Array access
+		{"Array index", "$.array[0]", "a", false},
+		{"Array last", "$.array[-1]", "c", false},
+		{"Array wildcard", "$.array[*]", []interface{}{"a", "b", "c"}, false},
+		
+		// Object array access
+		{"Object array index", "$.objects[0].name", "First", false},
+		{"Object array filter", "$.objects[?(@.id == 2)].name", "Second", false},
+		{"Object array wildcard with field", "$.objects[*].name", []interface{}{"First", "Second", "Third"}, false},
+		{"Object array wildcard with nested", "$.objects[*].id", []interface{}{float64(1), float64(2), float64(3)}, false},
+		
+		// Filter patterns
+		{"Filter by id", "$.objects[?(@.id == 1)].name", "First", false},
+		{"Filter by active", "$.objects[?(@.active == true)].name", "First", false},
+		{"Filter by name", "$.objects[?(@.name == \"Second\")].id", float64(2), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, err := validator.extractJSONValue(jsonData, tt.path)
+			
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// For arrays, compare JSON representation
+			if expectedArray, ok := tt.expected.([]interface{}); ok {
+				actualArray, ok := value.([]interface{})
+				if !ok {
+					t.Errorf("Expected array, got %T: %v", value, value)
+					return
+				}
+				if len(actualArray) != len(expectedArray) {
+					t.Errorf("Array length mismatch: expected %d, got %d", len(expectedArray), len(actualArray))
+					return
+				}
+				expectedJSON, _ := json.Marshal(expectedArray)
+				actualJSON, _ := json.Marshal(actualArray)
+				if string(expectedJSON) != string(actualJSON) {
+					t.Errorf("Expected %s, got %s", string(expectedJSON), string(actualJSON))
+				}
+			} else {
+				// For simple values, use deep equality
+				expectedJSON, _ := json.Marshal(tt.expected)
+				actualJSON, _ := json.Marshal(value)
+				if string(expectedJSON) != string(actualJSON) {
+					t.Errorf("Expected %s, got %s", string(expectedJSON), string(actualJSON))
+				}
+			}
+		})
+	}
+}
+
 func boolPtr(b bool) *bool { return &b }
 func intPtr(i int) *int    { return &i }

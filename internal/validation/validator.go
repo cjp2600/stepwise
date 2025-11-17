@@ -535,7 +535,7 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 			parts = append(parts, buf.String())
 		}
 		current := data
-		for _, part := range parts {
+		for i, part := range parts {
 			// Special handling for "length" property on arrays
 			if part == "length" {
 				if arr, ok := current.([]interface{}); ok {
@@ -581,6 +581,27 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 				if err != nil {
 					return nil, err
 				}
+				
+				// Если результат - массив и есть еще части пути, нужно применить путь к каждому элементу
+				if resultArray, ok := result.([]interface{}); ok && i < len(parts)-1 {
+					// Есть еще части пути после массива - применить к каждому элементу
+					remainingPath := strings.Join(parts[i+1:], ".")
+					if !strings.HasPrefix(remainingPath, "$") {
+						remainingPath = "$." + remainingPath
+					}
+					
+					var mappedResults []interface{}
+					for _, item := range resultArray {
+						value, err := v.extractJSONValue(item, remainingPath)
+						if err != nil {
+							// Пропускаем элементы, где путь не найден
+							continue
+						}
+						mappedResults = append(mappedResults, value)
+					}
+					return mappedResults, nil
+				}
+				
 				current = result
 			} else {
 				// Обычный ключ
@@ -599,7 +620,7 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 	}
 
 	if strings.HasPrefix(substitutedPath, "$[") {
-		// Handle paths like $[0] or $[filter] or $[filter].field
+		// Handle paths like $[0] or $[filter] or $[filter].field or $[*].field
 		closeBracket := strings.Index(substitutedPath, "]")
 		if closeBracket == -1 {
 			return nil, fmt.Errorf("unclosed bracket in path: %s", substitutedPath)
@@ -620,6 +641,21 @@ func (v *Validator) extractJSONValue(data interface{}, path string) (interface{}
 				if strings.HasPrefix(remainingPath, ".") {
 					remainingPath = "$" + remainingPath
 				}
+				
+				// Если результат - массив (например, при использовании [*]), применить путь к каждому элементу
+				if resultArray, ok := result.([]interface{}); ok {
+					var mappedResults []interface{}
+					for _, item := range resultArray {
+						value, err := v.extractJSONValue(item, remainingPath)
+						if err != nil {
+							// Пропускаем элементы, где путь не найден
+							continue
+						}
+						mappedResults = append(mappedResults, value)
+					}
+					return mappedResults, nil
+				}
+				
 				return v.extractJSONValue(result, remainingPath)
 			}
 
