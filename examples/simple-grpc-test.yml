@@ -1,13 +1,16 @@
 name: "Simple gRPC Test"
 version: "1.0"
-description: "Simple test workflow for gRPC calls"
+description: "Simple test workflow for gRPC calls with variable substitution in metadata"
 
 variables:
   grpc_server: "localhost:50051"
+  api_key: "test-key-12345"
+  client_id: "stepwise-client"
+  auth_token: "{{env.AUTH_TOKEN}}"
 
 steps:
   - name: "gRPC User Service Call"
-    description: "Make a gRPC call to user service"
+    description: "Make a gRPC call to user service with variable substitution in metadata"
     request:
       protocol: "grpc"
       service: "UserService"
@@ -17,10 +20,31 @@ steps:
       data:
         user_id: "1"
       metadata:
-        api_key: "test-key"
+        api_key: "{{api_key}}"
+        client_id: "{{client_id}}"
+        authorization: "Bearer {{auth_token}}"
       timeout: "10s"
     validate:
       - status: 200
     capture:
       grpc_user_id: "$.user_id"
-      grpc_user_name: "$.name" 
+      grpc_user_name: "$.name"
+
+  - name: "gRPC Call with Captured Data in Metadata"
+    description: "Use captured data from previous step in metadata"
+    request:
+      protocol: "grpc"
+      service: "UserService"
+      grpc_method: "UpdateUser"
+      server_addr: "{{grpc_server}}"
+      insecure: true
+      data:
+        user_id: "{{grpc_user_id}}"
+        name: "{{grpc_user_name}}"
+      metadata:
+        api_key: "{{api_key}}"
+        user_id: "{{grpc_user_id}}"
+        trace_id: "trace-{{grpc_user_id}}"
+      timeout: "10s"
+    validate:
+      - status: 200 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cjp2600/stepwise/internal/config"
+	dbclient "github.com/cjp2600/stepwise/internal/database"
 	grpcclient "github.com/cjp2600/stepwise/internal/grpc"
 	httpclient "github.com/cjp2600/stepwise/internal/http"
 	"github.com/cjp2600/stepwise/internal/logger"
@@ -87,9 +88,9 @@ type PollConfig struct {
 	Until       []validation.ValidationRule `yaml:"until" json:"until"`                           // Conditions that must be met to stop polling
 }
 
-// Request represents an HTTP or gRPC request
+// Request represents an HTTP, gRPC, or database request
 type Request struct {
-	// Protocol type: "http" or "grpc"
+	// Protocol type: "http", "grpc", or "db"
 	Protocol string `yaml:"protocol" json:"protocol"`
 
 	// HTTP fields
@@ -97,7 +98,7 @@ type Request struct {
 	URL     string            `yaml:"url" json:"url"`
 	Headers map[string]string `yaml:"headers" json:"headers"`
 	Body    interface{}       `yaml:"body" json:"body"`
-	Query   map[string]string `yaml:"query" json:"query"`
+	Query   interface{}       `yaml:"query" json:"query"` // map[string]string for HTTP, string for DB
 	Auth    *httpclient.Auth  `yaml:"auth" json:"auth"`
 
 	// gRPC fields
@@ -107,6 +108,9 @@ type Request struct {
 	Metadata   map[string]string `yaml:"metadata" json:"metadata"`
 	ServerAddr string            `yaml:"server_addr" json:"server_addr"`
 	Insecure   bool              `yaml:"insecure" json:"insecure"`
+
+	// Database fields
+	DBConfig *dbclient.Config `yaml:"db" json:"db"`
 
 	// Common fields
 	Timeout string `yaml:"timeout" json:"timeout"`
@@ -152,6 +156,7 @@ type Executor struct {
 	logger           *logger.Logger
 	httpClient       *httpclient.Client
 	grpcClient       *grpcclient.Client
+	dbClient         *dbclient.Client
 	validator        *validation.Validator
 	varManager       *variables.Manager
 	progressCallback ProgressCallback
@@ -709,6 +714,7 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		// Execute request based on protocol
 		var httpResponse *httpclient.Response
 		var grpcResponse *grpcclient.Response
+		var dbResponse *dbclient.Response
 		var requestErr error
 
 		e.logger.Debug("Executing request", "protocol", substitutedReq.Protocol)
@@ -735,14 +741,81 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 				Timeout:    e.parseTimeout(substitutedReq.Timeout),
 			}
 			grpcResponse, requestErr = e.grpcClient.Execute(grpcReq)
+		} else if substitutedReq.Protocol == "db" {
+			// Execute database request
+			if substitutedReq.DBConfig == nil {
+				lastError = fmt.Errorf("database configuration is required for db protocol")
+				continue
+			}
+
+			// Substitute variables in database config
+			dbConfig := substitutedReq.DBConfig
+			// If DSN is provided, substitute variables in DSN
+			if dbConfig.DSN != "" {
+				if subDSN, err := e.varManager.Substitute(dbConfig.DSN); err == nil {
+					dbConfig.DSN = subDSN
+				}
+			} else {
+				// Otherwise, substitute individual parameters
+				if dbConfig.Host != "" {
+					if subHost, err := e.varManager.Substitute(dbConfig.Host); err == nil {
+						dbConfig.Host = subHost
+					}
+				}
+				if dbConfig.Username != "" {
+					if subUser, err := e.varManager.Substitute(dbConfig.Username); err == nil {
+						dbConfig.Username = subUser
+					}
+				}
+				if dbConfig.Password != "" {
+					if subPass, err := e.varManager.Substitute(dbConfig.Password); err == nil {
+						dbConfig.Password = subPass
+					}
+				}
+				if dbConfig.Database != "" {
+					if subDB, err := e.varManager.Substitute(dbConfig.Database); err == nil {
+						dbConfig.Database = subDB
+					}
+				}
+			}
+
+			// Get query string
+			query := ""
+			if queryStr, ok := substitutedReq.Query.(string); ok {
+				query = queryStr
+			}
+			if query == "" {
+				lastError = fmt.Errorf("query is required for db protocol")
+				continue
+			}
+
+			// Set timeout if not set
+			if dbConfig.Timeout == 0 {
+				dbConfig.Timeout = e.parseTimeout(substitutedReq.Timeout)
+			}
+
+			// Create or reuse database client
+			// For now, create a new client each time (could be optimized to reuse connections)
+			dbClient, err := dbclient.NewClient(dbConfig, e.logger)
+			if err != nil {
+				lastError = fmt.Errorf("failed to create database client: %w", err)
+				continue
+			}
+			defer dbClient.Close()
+
+			dbResponse, requestErr = dbClient.Execute(query)
 		} else {
 			// Execute HTTP request (default)
+			queryMap := make(map[string]string)
+			if query, ok := substitutedReq.Query.(map[string]string); ok {
+				queryMap = query
+			}
 			httpReq := &httpclient.Request{
 				Method:  substitutedReq.Method,
 				URL:     substitutedReq.URL,
 				Headers: substitutedReq.Headers,
 				Body:    substitutedReq.Body,
-				Query:   substitutedReq.Query,
+				Query:   queryMap,
 				Timeout: e.parseTimeout(substitutedReq.Timeout),
 				Auth:    substitutedReq.Auth,
 			}
@@ -753,7 +826,7 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			lastError = fmt.Errorf("request failed: %w", requestErr)
 			// Log API response on request error when verbose is enabled (if response exists)
 			if !e.logger.IsMuted() {
-				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, step.Name)
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
 			}
 			continue
 		}
@@ -775,6 +848,19 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 						StatusCode: 200, // gRPC OK status
 						Body:       jsonData,
 						Duration:   grpcResponse.Duration,
+					}
+					validationResults, validationErr = e.validator.Validate(mockResponse, step.Validate)
+				}
+			} else if substitutedReq.Protocol == "db" {
+				// For database, create a mock HTTP response for validation
+				jsonData, err := json.Marshal(dbResponse.Data)
+				if err != nil {
+					validationErr = fmt.Errorf("failed to marshal database response for validation: %w", err)
+				} else {
+					mockResponse := &httpclient.Response{
+						StatusCode: 200, // Database OK status
+						Body:       jsonData,
+						Duration:   dbResponse.Duration,
 					}
 					validationResults, validationErr = e.validator.Validate(mockResponse, step.Validate)
 				}
@@ -800,7 +886,7 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			lastError = fmt.Errorf("validation failed: %s", strings.Join(validationErrors, "; "))
 			// Log API response on validation failure when verbose is enabled
 			if !e.logger.IsMuted() {
-				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, step.Name)
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
 			}
 			continue
 		}
@@ -821,6 +907,19 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 					}
 					captureErr = e.captureValues(mockResponse, step.Capture, result)
 				}
+			} else if substitutedReq.Protocol == "db" {
+				// For database, create a mock response for capture
+				jsonData, err := json.Marshal(dbResponse.Data)
+				if err != nil {
+					captureErr = fmt.Errorf("failed to marshal database response: %w", err)
+				} else {
+					mockResponse := &httpclient.Response{
+						StatusCode: 200,
+						Body:       jsonData,
+						Duration:   dbResponse.Duration,
+					}
+					captureErr = e.captureValues(mockResponse, step.Capture, result)
+				}
 			} else {
 				captureErr = e.captureValues(httpResponse, step.Capture, result)
 			}
@@ -836,6 +935,15 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
 					if err == nil {
 						fmt.Println("================ RESPONSE (gRPC) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else if substitutedReq.Protocol == "db" {
+				if dbResponse != nil {
+					jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (DB) ================")
 						fmt.Println(string(jsonData))
 						fmt.Println("================ END RESPONSE ================")
 					}
@@ -879,6 +987,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 	var lastError error
 	var lastHTTPResponse *httpclient.Response
 	var lastGRPCResponse *grpcclient.Response
+	var lastDBResponse *dbclient.Response
 	var lastSubstitutedReq *Request
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -905,6 +1014,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 		// Execute request based on protocol
 		var httpResponse *httpclient.Response
 		var grpcResponse *grpcclient.Response
+		var dbResponse *dbclient.Response
 		var requestErr error
 
 		if substitutedReq.Protocol == "grpc" {
@@ -935,14 +1045,92 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			if grpcResponse != nil {
 				lastGRPCResponse = grpcResponse
 			}
+		} else if substitutedReq.Protocol == "db" {
+			// Execute database request
+			if substitutedReq.DBConfig == nil {
+				lastError = fmt.Errorf("database configuration is required for db protocol")
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+
+			// Substitute variables in database config
+			dbConfig := substitutedReq.DBConfig
+			// If DSN is provided, substitute variables in DSN
+			if dbConfig.DSN != "" {
+				if subDSN, err := e.varManager.Substitute(dbConfig.DSN); err == nil {
+					dbConfig.DSN = subDSN
+				}
+			} else {
+				// Otherwise, substitute individual parameters
+				if dbConfig.Host != "" {
+					if subHost, err := e.varManager.Substitute(dbConfig.Host); err == nil {
+						dbConfig.Host = subHost
+					}
+				}
+				if dbConfig.Username != "" {
+					if subUser, err := e.varManager.Substitute(dbConfig.Username); err == nil {
+						dbConfig.Username = subUser
+					}
+				}
+				if dbConfig.Password != "" {
+					if subPass, err := e.varManager.Substitute(dbConfig.Password); err == nil {
+						dbConfig.Password = subPass
+					}
+				}
+				if dbConfig.Database != "" {
+					if subDB, err := e.varManager.Substitute(dbConfig.Database); err == nil {
+						dbConfig.Database = subDB
+					}
+				}
+			}
+
+			// Get query string
+			query := ""
+			if queryStr, ok := substitutedReq.Query.(string); ok {
+				query = queryStr
+			}
+			if query == "" {
+				lastError = fmt.Errorf("query is required for db protocol")
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+
+			// Set timeout if not set
+			if dbConfig.Timeout == 0 {
+				dbConfig.Timeout = e.parseTimeout(substitutedReq.Timeout)
+			}
+
+			// Create database client
+			dbClient, err := dbclient.NewClient(dbConfig, e.logger)
+			if err != nil {
+				lastError = fmt.Errorf("failed to create database client: %w", err)
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+			defer dbClient.Close()
+
+			dbResponse, requestErr = dbClient.Execute(query)
+			if dbResponse != nil {
+				lastDBResponse = dbResponse
+			}
 		} else {
 			// Execute HTTP request (default)
+			queryMap := make(map[string]string)
+			if query, ok := substitutedReq.Query.(map[string]string); ok {
+				queryMap = query
+			}
 			httpReq := &httpclient.Request{
 				Method:  substitutedReq.Method,
 				URL:     substitutedReq.URL,
 				Headers: substitutedReq.Headers,
 				Body:    substitutedReq.Body,
-				Query:   substitutedReq.Query,
+				Query:   queryMap,
 				Timeout: e.parseTimeout(substitutedReq.Timeout),
 				Auth:    substitutedReq.Auth,
 			}
@@ -957,7 +1145,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			e.logger.Debug("Polling attempt failed", "step", step.Name, "attempt", attempt, "error", requestErr)
 			// Log API response on request error when verbose is enabled (if response exists)
 			if !e.logger.IsMuted() {
-				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, step.Name)
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
 			}
 			if attempt < maxAttempts {
 				time.Sleep(interval)
@@ -984,6 +1172,21 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 				StatusCode: 200, // gRPC OK status
 				Body:       jsonData,
 				Duration:   grpcResponse.Duration,
+			}
+		} else if substitutedReq.Protocol == "db" {
+			// For database, create a mock HTTP response for validation
+			jsonData, err := json.Marshal(dbResponse.Data)
+			if err != nil {
+				lastError = fmt.Errorf("failed to marshal database response for validation: %w", err)
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+			responseForValidation = &httpclient.Response{
+				StatusCode: 200, // Database OK status
+				Body:       jsonData,
+				Duration:   dbResponse.Duration,
 			}
 		} else {
 			responseForValidation = httpResponse
@@ -1022,7 +1225,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			// Capture values if specified
 			if step.Capture != nil {
 				var captureErr error
-				if substitutedReq.Protocol == "grpc" {
+				if substitutedReq.Protocol == "grpc" || substitutedReq.Protocol == "db" {
 					captureErr = e.captureValues(responseForValidation, step.Capture, result)
 				} else {
 					captureErr = e.captureValues(httpResponse, step.Capture, result)
@@ -1039,6 +1242,15 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 						jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
 						if err == nil {
 							fmt.Println("================ RESPONSE (gRPC) ================")
+							fmt.Println(string(jsonData))
+							fmt.Println("================ END RESPONSE ================")
+						}
+					}
+				} else if substitutedReq.Protocol == "db" {
+					if dbResponse != nil {
+						jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
+						if err == nil {
+							fmt.Println("================ RESPONSE (DB) ================")
 							fmt.Println(string(jsonData))
 							fmt.Println("================ END RESPONSE ================")
 						}
@@ -1074,7 +1286,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 
 	// Log API response on failure when verbose is enabled
 	if !e.logger.IsMuted() && lastSubstitutedReq != nil {
-		e.logAPIResponseOnFailure(lastSubstitutedReq.Protocol, lastHTTPResponse, lastGRPCResponse, step.Name)
+		e.logAPIResponseOnFailure(lastSubstitutedReq.Protocol, lastHTTPResponse, lastGRPCResponse, lastDBResponse, step.Name)
 	}
 
 	if lastError != nil {
@@ -1321,13 +1533,14 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 		URL:        req.URL,
 		Headers:    make(map[string]string),
 		Body:       req.Body,
-		Query:      make(map[string]string),
+		Query:      req.Query, // Can be string for DB or map for HTTP
 		Service:    req.Service,
 		GRPCMethod: req.GRPCMethod,
 		Data:       req.Data,
-		Metadata:   req.Metadata,
+		Metadata:   make(map[string]string),
 		ServerAddr: req.ServerAddr,
 		Insecure:   req.Insecure,
+		DBConfig:   req.DBConfig,
 		Timeout:    req.Timeout,
 	}
 
@@ -1351,14 +1564,35 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 		}
 	}
 
-	// Substitute query parameters
-	for key, value := range req.Query {
-		if substitutedValue, err := e.varManager.Substitute(value); err != nil {
-			e.logger.Error("Failed to substitute query", "key", key, "value", value, "error", err)
-			return nil, fmt.Errorf("failed to substitute query %s: %w", key, err)
+	// Substitute query parameters (for HTTP) or query string (for DB)
+	if req.Protocol == "db" {
+		// For database, Query is a string (SQL query)
+		if queryStr, ok := req.Query.(string); ok && queryStr != "" {
+			if substitutedQuery, err := e.varManager.Substitute(queryStr); err != nil {
+				e.logger.Error("Failed to substitute database query", "query", queryStr, "error", err)
+				return nil, fmt.Errorf("failed to substitute database query: %w", err)
+			} else {
+				substituted.Query = substitutedQuery
+				e.logger.Debug("Database query substitution result", "original", queryStr, "substituted", substitutedQuery)
+			}
 		} else {
-			substituted.Query[key] = substitutedValue
-			e.logger.Debug("Query substitution result", "key", key, "original", value, "substituted", substitutedValue)
+			substituted.Query = req.Query
+		}
+	} else {
+		// For HTTP, Query is a map
+		if queryMap, ok := req.Query.(map[string]string); ok {
+			substituted.Query = make(map[string]string)
+			for key, value := range queryMap {
+				if substitutedValue, err := e.varManager.Substitute(value); err != nil {
+					e.logger.Error("Failed to substitute query", "key", key, "value", value, "error", err)
+					return nil, fmt.Errorf("failed to substitute query %s: %w", key, err)
+				} else {
+					substituted.Query.(map[string]string)[key] = substitutedValue
+					e.logger.Debug("Query substitution result", "key", key, "original", value, "substituted", substitutedValue)
+				}
+			}
+		} else {
+			substituted.Query = req.Query
 		}
 	}
 
@@ -1393,6 +1627,17 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 	} else {
 		substituted.ServerAddr = substitutedServerAddr
 		e.logger.Debug("ServerAddr substitution result", "original", req.ServerAddr, "substituted", substitutedServerAddr)
+	}
+
+	// Substitute gRPC metadata (similar to HTTP headers)
+	for key, value := range req.Metadata {
+		if substitutedValue, err := e.varManager.Substitute(value); err != nil {
+			e.logger.Error("Failed to substitute metadata", "key", key, "value", value, "error", err)
+			return nil, fmt.Errorf("failed to substitute metadata %s: %w", key, err)
+		} else {
+			substituted.Metadata[key] = substitutedValue
+			e.logger.Debug("Metadata substitution result", "key", key, "original", value, "substituted", substitutedValue)
+		}
 	}
 
 	// Substitute gRPC data
@@ -1458,7 +1703,7 @@ func (e *Executor) captureValues(response *httpclient.Response, captures map[str
 }
 
 // logAPIResponseOnFailure logs the API response when a step fails and verbose mode is enabled
-func (e *Executor) logAPIResponseOnFailure(protocol string, httpResponse *httpclient.Response, grpcResponse *grpcclient.Response, stepName string) {
+func (e *Executor) logAPIResponseOnFailure(protocol string, httpResponse *httpclient.Response, grpcResponse *grpcclient.Response, dbResponse *dbclient.Response, stepName string) {
 	if protocol == "grpc" {
 		if grpcResponse != nil {
 			jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
@@ -1468,6 +1713,20 @@ func (e *Executor) logAPIResponseOnFailure(protocol string, httpResponse *httpcl
 					"response", string(jsonData))
 			} else {
 				e.logger.Error("API Response (gRPC) on failure - failed to marshal",
+					"step", stepName,
+					"error", err)
+			}
+		}
+	} else if protocol == "db" {
+		if dbResponse != nil {
+			jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
+			if err == nil {
+				e.logger.Error("API Response (DB) on failure",
+					"step", stepName,
+					"rows", dbResponse.Rows,
+					"response", string(jsonData))
+			} else {
+				e.logger.Error("API Response (DB) on failure - failed to marshal",
 					"step", stepName,
 					"error", err)
 			}

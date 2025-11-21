@@ -50,7 +50,7 @@ steps:
       post_id: "$.id"
 
   - name: "gRPC User Service Call"
-    description: "Make a gRPC call to user service"
+    description: "Make a gRPC call to user service with variable substitution in metadata"
     request:
       protocol: "grpc"
       service: "UserService"
@@ -60,8 +60,9 @@ steps:
       data:
         user_id: "{{test_user_id}}"
       metadata:
-        api_key: "test-key"
+        api_key: "{{env.API_KEY}}"
         client_id: "stepwise-test"
+        user_id: "{{test_user_id}}"
       timeout: "10s"
     validate:
       - status: 200
@@ -72,7 +73,7 @@ steps:
       grpc_user_name: "$.name"
 
   - name: "gRPC Order Service Call"
-    description: "Make a gRPC call to order service"
+    description: "Make a gRPC call to order service with captured data in metadata"
     request:
       protocol: "grpc"
       service: "OrderService"
@@ -87,8 +88,10 @@ steps:
             price: 29.99
         total_amount: 59.98
       metadata:
-        api_key: "test-key"
+        api_key: "{{env.API_KEY}}"
         client_id: "stepwise-test"
+        user_id: "{{grpc_user_id}}"
+        request_id: "req-{{grpc_user_id}}"
       timeout: "10s"
     validate:
       - status: 200

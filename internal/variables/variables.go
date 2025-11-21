@@ -2,6 +2,7 @@ package variables
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -138,7 +139,12 @@ func (m *Manager) substituteEnvironmentVariables(input string) string {
 		// Extract environment variable name
 		envVar := strings.TrimSpace(strings.TrimPrefix(strings.Trim(match, "{}"), "env."))
 
-		// Get from environment variables
+		// First, try to get from OS environment variables
+		if value := os.Getenv(envVar); value != "" {
+			return value
+		}
+
+		// Fallback to variables map (for backward compatibility)
 		if value, exists := m.variables[envVar]; exists {
 			return fmt.Sprintf("%v", value)
 		}
