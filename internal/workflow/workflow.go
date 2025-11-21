@@ -739,6 +739,10 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 
 		if requestErr != nil {
 			lastError = fmt.Errorf("request failed: %w", requestErr)
+			// Log API response on request error when verbose is enabled (if response exists)
+			if !e.logger.IsMuted() {
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, step.Name)
+			}
 			continue
 		}
 
@@ -782,6 +786,10 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 
 		if len(validationErrors) > 0 {
 			lastError = fmt.Errorf("validation failed: %s", strings.Join(validationErrors, "; "))
+			// Log API response on validation failure when verbose is enabled
+			if !e.logger.IsMuted() {
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, step.Name)
+			}
 			continue
 		}
 
@@ -857,12 +865,18 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 		"interval", interval)
 
 	var lastError error
+	var lastHTTPResponse *httpclient.Response
+	var lastGRPCResponse *grpcclient.Response
+	var lastSubstitutedReq *Request
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		e.logger.Debug("Polling attempt", "step", step.Name, "attempt", attempt, "max_attempts", maxAttempts)
 
 		// Substitute variables in request
 		substitutedReq, err := e.substituteRequestVariables(&step.Request)
+		if err == nil {
+			lastSubstitutedReq = substitutedReq
+		}
 		if err != nil {
 			lastError = fmt.Errorf("variable substitution failed: %w", err)
 			if attempt < maxAttempts {
@@ -906,6 +920,9 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 				Timeout:    e.parseTimeout(substitutedReq.Timeout),
 			}
 			grpcResponse, requestErr = e.grpcClient.Execute(grpcReq)
+			if grpcResponse != nil {
+				lastGRPCResponse = grpcResponse
+			}
 		} else {
 			// Execute HTTP request (default)
 			httpReq := &httpclient.Request{
@@ -918,11 +935,18 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 				Auth:    substitutedReq.Auth,
 			}
 			httpResponse, requestErr = e.httpClient.Execute(httpReq)
+			if httpResponse != nil {
+				lastHTTPResponse = httpResponse
+			}
 		}
 
 		if requestErr != nil {
 			lastError = fmt.Errorf("request failed: %w", requestErr)
 			e.logger.Debug("Polling attempt failed", "step", step.Name, "attempt", attempt, "error", requestErr)
+			// Log API response on request error when verbose is enabled (if response exists)
+			if !e.logger.IsMuted() {
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, step.Name)
+			}
 			if attempt < maxAttempts {
 				time.Sleep(interval)
 			}
@@ -1035,6 +1059,12 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 	// All attempts exhausted, condition not met
 	result.PollAttempts = maxAttempts
 	result.Duration = time.Since(startTime)
+	
+	// Log API response on failure when verbose is enabled
+	if !e.logger.IsMuted() && lastSubstitutedReq != nil {
+		e.logAPIResponseOnFailure(lastSubstitutedReq.Protocol, lastHTTPResponse, lastGRPCResponse, step.Name)
+	}
+	
 	if lastError != nil {
 		return fmt.Errorf("polling failed after %d attempts: %w", maxAttempts, lastError)
 	}
@@ -1402,6 +1432,46 @@ func (e *Executor) captureValues(response *httpclient.Response, captures map[str
 	}
 
 	return nil
+}
+
+// logAPIResponseOnFailure logs the API response when a step fails and verbose mode is enabled
+func (e *Executor) logAPIResponseOnFailure(protocol string, httpResponse *httpclient.Response, grpcResponse *grpcclient.Response, stepName string) {
+	if protocol == "grpc" {
+		if grpcResponse != nil {
+			jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
+			if err == nil {
+				e.logger.Error("API Response (gRPC) on failure",
+					"step", stepName,
+					"response", string(jsonData))
+			} else {
+				e.logger.Error("API Response (gRPC) on failure - failed to marshal",
+					"step", stepName,
+					"error", err)
+			}
+		}
+	} else {
+		if httpResponse != nil && len(httpResponse.Body) > 0 {
+			// Try to format as JSON if possible, otherwise show as text
+			var responseText string
+			var jsonData interface{}
+			if err := json.Unmarshal(httpResponse.Body, &jsonData); err == nil {
+				// Valid JSON, format it nicely
+				formatted, err := json.MarshalIndent(jsonData, "", "  ")
+				if err == nil {
+					responseText = string(formatted)
+				} else {
+					responseText = string(httpResponse.Body)
+				}
+			} else {
+				// Not JSON, show as text
+				responseText = string(httpResponse.Body)
+			}
+			e.logger.Error("API Response (HTTP) on failure",
+				"step", stepName,
+				"status_code", httpResponse.StatusCode,
+				"response", responseText)
+		}
+	}
 }
 
 // parseTimeout parses a timeout string into duration
