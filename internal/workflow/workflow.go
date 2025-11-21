@@ -323,6 +323,18 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 				if step.ShowResponse {
 					mergedStep.ShowResponse = true
 				}
+				// Copy timeout: step-level timeout overrides component timeout
+				// If step has timeout in request, it overrides component's request timeout
+				if step.Request.Timeout != "" {
+					mergedStep.Request.Timeout = step.Request.Timeout
+					e.logger.Debug("[COMPONENT] Overriding timeout from step", "step", step.Name, "timeout", step.Request.Timeout)
+				} else if step.Timeout != "" {
+					// Also check step-level timeout field (for backward compatibility)
+					mergedStep.Request.Timeout = step.Timeout
+					e.logger.Debug("[COMPONENT] Overriding timeout from step-level field", "step", step.Name, "timeout", step.Timeout)
+				} else if mergedStep.Request.Timeout != "" {
+					e.logger.Debug("[COMPONENT] Using timeout from component", "step", step.Name, "timeout", mergedStep.Request.Timeout)
+				}
 				e.logger.Info("[COMPONENT] Executing use step", "use", step.Use, "step", mergedStep.Name)
 				// Initialize component variables first
 				e.initializeVariables(comp.Variables)
@@ -1059,12 +1071,12 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 	// All attempts exhausted, condition not met
 	result.PollAttempts = maxAttempts
 	result.Duration = time.Since(startTime)
-	
+
 	// Log API response on failure when verbose is enabled
 	if !e.logger.IsMuted() && lastSubstitutedReq != nil {
 		e.logAPIResponseOnFailure(lastSubstitutedReq.Protocol, lastHTTPResponse, lastGRPCResponse, step.Name)
 	}
-	
+
 	if lastError != nil {
 		return fmt.Errorf("polling failed after %d attempts: %w", maxAttempts, lastError)
 	}
@@ -1407,7 +1419,18 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 		}
 	}
 
-	e.logger.Debug("Final substituted request", "url", substituted.URL, "method", substituted.Method)
+	// Substitute timeout if it contains variables
+	if req.Timeout != "" {
+		if substitutedTimeout, err := e.varManager.Substitute(req.Timeout); err != nil {
+			e.logger.Error("Failed to substitute timeout", "timeout", req.Timeout, "error", err)
+			return nil, fmt.Errorf("failed to substitute timeout: %w", err)
+		} else {
+			substituted.Timeout = substitutedTimeout
+			e.logger.Debug("Timeout substitution result", "original", req.Timeout, "substituted", substitutedTimeout)
+		}
+	}
+
+	e.logger.Debug("Final substituted request", "url", substituted.URL, "method", substituted.Method, "timeout", substituted.Timeout)
 	return substituted, nil
 }
 
