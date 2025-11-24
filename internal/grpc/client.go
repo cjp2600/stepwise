@@ -98,14 +98,65 @@ func (c *Client) Execute(req *Request) (*Response, error) {
 	methodName := req.Service + "." + req.Method
 	c.logger.Debug("Looking up method", "method", methodName)
 
+	var method *desc.MethodDescriptor
+
+	// Try to find method directly (works for services with package)
 	mDesc, err := descSource.FindSymbol(methodName)
 	if err != nil {
-		c.logger.Debug("Method lookup failed", "error", err)
-		return nil, fmt.Errorf("failed to find method %s: %w", methodName, err)
-	}
-	method, ok := mDesc.(*desc.MethodDescriptor)
-	if !ok {
-		return nil, fmt.Errorf("symbol %s is not a method", methodName)
+		c.logger.Debug("Direct method lookup failed, trying service-based lookup", "error", err)
+		
+		// Fallback: try to find service first, then method within service
+		// This works for services without package declaration
+		// First try to find service via FindSymbol (works for services with package)
+		svcDesc, svcErr := descSource.FindSymbol(req.Service)
+		var service *desc.ServiceDescriptor
+		
+		if svcErr != nil {
+			c.logger.Debug("Service lookup via FindSymbol failed, trying ListServices and ResolveService", "error", svcErr)
+			// Try listing services to find the correct one
+			// This is necessary for services without package declaration
+			services, listErr := descSource.ListServices()
+			if listErr != nil {
+				c.logger.Debug("List services failed", "error", listErr)
+				return nil, fmt.Errorf("failed to find method %s: %w", methodName, err)
+			}
+			
+			// Find the service by name using ResolveService (works for services without package)
+			for _, svcName := range services {
+				if svcName == req.Service {
+					service, svcErr = rc.ResolveService(svcName)
+					if svcErr == nil && service != nil {
+						c.logger.Debug("Found service via ResolveService", "service", svcName)
+						break
+					}
+				}
+			}
+			
+			if service == nil {
+				return nil, fmt.Errorf("failed to find service %s: %w", req.Service, svcErr)
+			}
+		} else {
+			// Found service via FindSymbol, convert to ServiceDescriptor
+			var ok bool
+			service, ok = svcDesc.(*desc.ServiceDescriptor)
+			if !ok {
+				return nil, fmt.Errorf("symbol %s is not a service", req.Service)
+			}
+		}
+		
+		// Find method within the service
+		method = service.FindMethodByName(req.Method)
+		if method == nil {
+			return nil, fmt.Errorf("method %s not found in service %s", req.Method, req.Service)
+		}
+		c.logger.Debug("Found method via service lookup", "service", req.Service, "method", req.Method)
+	} else {
+		var ok bool
+		method, ok = mDesc.(*desc.MethodDescriptor)
+		if !ok {
+			return nil, fmt.Errorf("symbol %s is not a method", methodName)
+		}
+		c.logger.Debug("Found method via direct lookup", "method", methodName)
 	}
 
 	inputType := method.GetInputType()

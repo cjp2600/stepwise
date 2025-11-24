@@ -1,0 +1,44 @@
+name: "Get Customer Operations Component"
+version: "1.0"
+description: "Get Customer Operations Component via gRPC"
+type: "step"
+
+variables:
+  operation_service_grpc: "customer-operations.tabby.dev:8000"
+  limit: 10
+  offset: 0
+
+steps:
+  - name: "Call gRPC->GetCustomerOperations"
+    show_response: false
+    request:
+      protocol: "grpc"
+      service: "OperationService"
+      grpc_method: "GetCustomerOperations"
+      server_addr: "{{operation_service_grpc}}"
+      insecure: true
+      data:
+        customer_id: "{{customer_id}}"
+        limit: "{{limit}}"
+        offset: "{{offset}}"
+      timeout: "10s"
+    validate:
+      - status: 200
+      - json: "$.operations"
+        type: "array"
+      - json: "$.operations[0].id"
+        type: "string"
+        empty: false
+      - json: "$.operations[0].entity_id"
+        type: "string"
+        empty: false
+      - json: "$.operations[0].entity_type"
+        type: "string"
+        empty: false
+      - json: "$.operations[0].title"
+        type: "string"
+        empty: false
+      - json: "$.operations[0].operation_date"
+        type: "string"
+        empty: false
+
