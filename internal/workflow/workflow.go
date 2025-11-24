@@ -831,6 +831,35 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			continue
 		}
 
+		// Show response if requested (always show, regardless of validation results)
+		if step.ShowResponse {
+			if substitutedReq.Protocol == "grpc" {
+				if grpcResponse != nil {
+					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (gRPC) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else if substitutedReq.Protocol == "db" {
+				if dbResponse != nil {
+					jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (DB) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else {
+				if httpResponse != nil && len(httpResponse.Body) > 0 {
+					fmt.Println("================ RESPONSE ================")
+					fmt.Println(string(httpResponse.Body))
+					fmt.Println("================ END RESPONSE ================")
+				}
+			}
+		}
+
 		// Run validations
 		var validationErrors []string
 		if len(step.Validate) > 0 {
@@ -925,35 +954,6 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			}
 			if captureErr != nil {
 				e.logger.Warn("Failed to capture values", "step", step.Name, "error", captureErr)
-			}
-		}
-
-		// После capture/validate, если step.ShowResponse, печатаем тело ответа
-		if step.ShowResponse {
-			if substitutedReq.Protocol == "grpc" {
-				if grpcResponse != nil {
-					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
-					if err == nil {
-						fmt.Println("================ RESPONSE (gRPC) ================")
-						fmt.Println(string(jsonData))
-						fmt.Println("================ END RESPONSE ================")
-					}
-				}
-			} else if substitutedReq.Protocol == "db" {
-				if dbResponse != nil {
-					jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
-					if err == nil {
-						fmt.Println("================ RESPONSE (DB) ================")
-						fmt.Println(string(jsonData))
-						fmt.Println("================ END RESPONSE ================")
-					}
-				}
-			} else {
-				if httpResponse != nil && len(httpResponse.Body) > 0 {
-					fmt.Println("================ RESPONSE ================")
-					fmt.Println(string(httpResponse.Body))
-					fmt.Println("================ END RESPONSE ================")
-				}
 			}
 		}
 
@@ -1192,6 +1192,35 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			responseForValidation = httpResponse
 		}
 
+		// Show response if requested (always show, regardless of validation results)
+		if step.ShowResponse {
+			if substitutedReq.Protocol == "grpc" {
+				if grpcResponse != nil {
+					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (gRPC) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else if substitutedReq.Protocol == "db" {
+				if dbResponse != nil {
+					jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (DB) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else {
+				if httpResponse != nil && len(httpResponse.Body) > 0 {
+					fmt.Println("================ RESPONSE ================")
+					fmt.Println(string(httpResponse.Body))
+					fmt.Println("================ END RESPONSE ================")
+				}
+			}
+		}
+
 		// Validate against poll.until conditions
 		validationResults, validationErr = e.validator.Validate(responseForValidation, pollConfig.Until)
 
@@ -1232,35 +1261,6 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 				}
 				if captureErr != nil {
 					e.logger.Warn("Failed to capture values", "step", step.Name, "error", captureErr)
-				}
-			}
-
-			// Show response if requested
-			if step.ShowResponse {
-				if substitutedReq.Protocol == "grpc" {
-					if grpcResponse != nil {
-						jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
-						if err == nil {
-							fmt.Println("================ RESPONSE (gRPC) ================")
-							fmt.Println(string(jsonData))
-							fmt.Println("================ END RESPONSE ================")
-						}
-					}
-				} else if substitutedReq.Protocol == "db" {
-					if dbResponse != nil {
-						jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
-						if err == nil {
-							fmt.Println("================ RESPONSE (DB) ================")
-							fmt.Println(string(jsonData))
-							fmt.Println("================ END RESPONSE ================")
-						}
-					}
-				} else {
-					if httpResponse != nil && len(httpResponse.Body) > 0 {
-						fmt.Println("================ RESPONSE ================")
-						fmt.Println(string(httpResponse.Body))
-						fmt.Println("================ END RESPONSE ================")
-					}
 				}
 			}
 
