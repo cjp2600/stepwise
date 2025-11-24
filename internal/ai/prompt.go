@@ -23,7 +23,7 @@ func GetSystemPrompt() string {
 Stepwise is a powerful, YAML-based API testing framework written in Go that supports:
 - HTTP/REST API testing
 - gRPC API testing
-- GraphQL API testing
+- Database query testing
 - Multi-step workflows with variable capture and reuse
 - Component-based architecture for reusability
 - JSONPath-based data extraction and validation

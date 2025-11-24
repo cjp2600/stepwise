@@ -9,7 +9,7 @@ Stepwise is an open-source API testing framework written in Go, inspired by [Ste
 ## Features
 
 - **Language-Agnostic Configuration**: Support for YAML, JSON, and JavaScript configuration files
-- **Universal Protocol Support**: REST, GraphQL, gRPC, SOAP, and WebSocket APIs
+- **Multi-Protocol Support**: HTTP/REST, gRPC, and Database queries
 - **Multi-Step Workflows**: Chain requests together using captures and variables
 - **Advanced Component System**: Reusable components with imports, overrides, and cycle detection
 - **Recursive Execution**: Control over directory search with `-r` flag
@@ -467,7 +467,7 @@ See the `examples/` directory for complete workflow examples:
 
 ### Mixed Protocol Examples
 - `examples/demo-mixed-workflow.yml` - HTTP and gRPC testing
-- `examples/mixed-protocol-test.yml` - Mixed protocol workflow
+- `examples/mixed-protocol-test.yml` - HTTP, gRPC, and Database testing
 
 ### Templates
 - `examples/templates/httpbin-api.yml` - HTTPBin API template
