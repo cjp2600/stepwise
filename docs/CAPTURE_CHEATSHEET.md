@@ -1,12 +1,12 @@
-# Шпаргалка: Захват и валидация переменных
+# Cheat Sheet: Variable Capture and Validation
 
-## 🎯 Быстрый старт
+## 🎯 Quick Start
 
-### Базовый пример
+### Basic Example
 
 ```yaml
 steps:
-  # 1️⃣ Захватываем данные
+  # 1️⃣ Capture data
   - name: "Get User"
     request:
       method: "GET"
@@ -15,19 +15,19 @@ steps:
       user_id: "$.id"
       user_name: "$.name"
 
-  # 2️⃣ Сравниваем с захваченными данными
+  # 2️⃣ Compare with captured data
   - name: "Verify User"
     request:
       method: "GET"
       url: "https://api.example.com/users/{{user_id}}"
     validate:
       - json: "$.name"
-        equals: "{{user_name}}"  # ✅ Сравнение!
+        equals: "{{user_name}}"  # ✅ Comparison!
 ```
 
-## 📦 Захват данных (Capture)
+## 📦 Data Capture
 
-### Простые поля
+### Simple Fields
 ```yaml
 capture:
   user_id: "$.id"
@@ -35,21 +35,21 @@ capture:
   user_email: "$.email"
 ```
 
-### Вложенные поля
+### Nested Fields
 ```yaml
 capture:
   city: "$.address.city"
   lat: "$.address.geo.lat"
 ```
 
-### Из массива с фильтром
+### From Array with Filter
 ```yaml
 capture:
   title: "$[?(@.id == 5)].title"
   body: "$[?(@.id == 5)].body"
 ```
 
-### Первый/последний элемент
+### First/Last Element
 ```yaml
 capture:
   first: "$[0]"
@@ -57,9 +57,9 @@ capture:
   range: "$[0:3]"
 ```
 
-## ✅ Валидация с переменными
+## ✅ Validation with Variables
 
-### Прямое сравнение
+### Direct Comparison
 ```yaml
 validate:
   - json: "$.id"
@@ -68,7 +68,7 @@ validate:
     equals: "{{saved_name}}"
 ```
 
-### Вложенные поля
+### Nested Fields
 ```yaml
 validate:
   - json: "$.address.city"
@@ -77,11 +77,11 @@ validate:
     equals: "{{saved_lat}}"
 ```
 
-## 🔗 Цепочка запросов
+## 🔗 Chained Requests
 
 ```yaml
 steps:
-  # Шаг 1: Получаем ID
+  # Step 1: Get ID
   - name: "Get Post"
     request:
       method: "GET"
@@ -89,7 +89,7 @@ steps:
     capture:
       author_id: "$.userId"
 
-  # Шаг 2: Используем ID
+  # Step 2: Use ID
   - name: "Get Author"
     request:
       method: "GET"
@@ -99,9 +99,9 @@ steps:
         equals: "{{author_id}}"  # ✅
 ```
 
-## 🧩 Компоненты
+## 🧩 Components
 
-### Компонент с захватом
+### Component with Capture
 ```yaml
 # components/get-user.yml
 name: "Get User"
@@ -120,7 +120,7 @@ steps:
       user_email: "$.email"
 ```
 
-### Использование
+### Usage
 ```yaml
 imports:
   - path: "components/get-user"
@@ -132,7 +132,7 @@ steps:
     variables:
       user_id: "5"
   
-  # Переменные доступны!
+  # Variables are available!
   - name: "Verify"
     request:
       method: "GET"
@@ -142,21 +142,21 @@ steps:
         equals: "{{user_name}}"  # ✅
 ```
 
-## 🎨 JSONPath фильтры
+## 🎨 JSONPath Filters
 
-| Фильтр | Описание | Пример |
-|--------|----------|--------|
-| `$[?(@.id == 5)]` | Равенство | `$[?(@.id == 5)].title` |
-| `$[?(@.id > 95)]` | Больше | `$[?(@.price > 100)]` |
-| `$[?(@.id < 10)]` | Меньше | `$[?(@.age < 18)]` |
-| `$[0]` | Первый элемент | `$[0].name` |
-| `$[-1]` | Последний | `$[-1].id` |
-| `$[0:3]` | Диапазон | `$[0:5]` |
-| `$[*]` | Все элементы | `$[*].id` |
+| Filter | Description | Example |
+|--------|-------------|---------|
+| `$[?(@.id == 5)]` | Equality | `$[?(@.id == 5)].title` |
+| `$[?(@.id > 95)]` | Greater than | `$[?(@.price > 100)]` |
+| `$[?(@.id < 10)]` | Less than | `$[?(@.age < 18)]` |
+| `$[0]` | First element | `$[0].name` |
+| `$[-1]` | Last element | `$[-1].id` |
+| `$[0:3]` | Range | `$[0:5]` |
+| `$[*]` | All elements | `$[*].id` |
 
-## 💡 Лучшие практики
+## 💡 Best Practices
 
-### ✅ Хорошо
+### ✅ Good
 ```yaml
 capture:
   saved_user_id: "$.id"
@@ -164,7 +164,7 @@ capture:
   original_email: "$.email"
 ```
 
-### ❌ Плохо
+### ❌ Bad
 ```yaml
 capture:
   id: "$.id"
@@ -172,14 +172,14 @@ capture:
   e: "$.email"
 ```
 
-## 📝 Полный пример
+## 📝 Complete Example
 
 ```yaml
 name: "Complete Example"
 version: "1.0"
 
 steps:
-  # 1. Получаем список постов
+  # 1. Get posts list
   - name: "Get Posts"
     request:
       method: "GET"
@@ -188,7 +188,7 @@ steps:
       post_5_title: "$[?(@.id == 5)].title"
       post_5_user_id: "$[?(@.id == 5)].userId"
 
-  # 2. Проверяем конкретный пост
+  # 2. Verify specific post
   - name: "Verify Post"
     request:
       method: "GET"
@@ -199,7 +199,7 @@ steps:
       - json: "$.userId"
         equals: "{{post_5_user_id}}"
 
-  # 3. Получаем автора
+  # 3. Get author
   - name: "Get Author"
     request:
       method: "GET"
@@ -208,7 +208,7 @@ steps:
       author_name: "$.name"
       author_city: "$.address.city"
 
-  # 4. Используем все переменные
+  # 4. Use all variables
   - name: "Final Check"
     request:
       method: "GET"
@@ -220,22 +220,21 @@ steps:
       - status: 200
 ```
 
-## 🚀 Запуск примеров
+## 🚀 Running Examples
 
 ```bash
-# Простой пример
+# Simple example
 go run main.go run examples/working-capture-compare.yml
 
-# С компонентами
+# With components
 go run main.go run examples/component-capture-workflow.yml
 
-# Демонстрация всех возможностей
+# Full capabilities demo
 go run main.go run examples/capture-and-compare-demo.yml
 ```
 
-## 📚 Дополнительная информация
+## 📚 Additional Information
 
-- Полное руководство: `docs/CAPTURE_AND_VALIDATION_GUIDE.md`
-- Переменные: `docs/VARIABLE_KEYS.md`
-- Компоненты: `docs/COMPONENTS.md`
-
+- Full guide: `docs/CAPTURE_AND_VALIDATION_GUIDE.md`
+- Variables: `docs/VARIABLE_KEYS.md`
+- Components: `docs/COMPONENTS.md`

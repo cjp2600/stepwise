@@ -14,10 +14,10 @@ git clone https://github.com/cjp2600/stepwise.git
 cd stepwise
 
 # Build the application
-go build -o stepwise cmd/stepwise/main.go
+go build -o stepwise main.go
 
 # Or install globally
-go install ./cmd/stepwise
+go install .
 ```
 
 ### Binary Download
@@ -47,11 +47,17 @@ stepwise run test-workflows/ -r
 # Run with verbose output
 stepwise run workflow.yml --verbose
 
-# Run with custom variables
-stepwise run workflow.yml --var base_url=https://api.example.com
+# Run with parallel execution
+stepwise run test-workflows/ --parallel 4
 
-# Run with environment file
-stepwise run workflow.yml --env production
+# Run with fail-fast mode (stop on first failure)
+stepwise run workflow.yml --fail-fast
+
+# Generate HTML report
+stepwise run workflow.yml --html-report
+
+# Generate HTML report with custom path
+stepwise run workflow.yml --html-report --html-report-path custom-report.html
 ```
 
 ### `stepwise validate`
@@ -64,9 +70,6 @@ stepwise validate workflow.yml
 
 # Validate all workflows in directory
 stepwise validate test-workflows/
-
-# Validate with verbose output
-stepwise validate workflow.yml --verbose
 ```
 
 ### `stepwise info`
@@ -76,21 +79,64 @@ Display information about a workflow.
 ```bash
 # Show workflow information
 stepwise info workflow.yml
+```
 
-# Show detailed information
-stepwise info workflow.yml --verbose
+### `stepwise init`
+
+Initialize a new Stepwise project.
+
+```bash
+# Create a new workflow file
+stepwise init
+```
+
+This creates a `workflow.yml` file with a basic example.
+
+### `stepwise codex`
+
+AI assistant for creating workflows (requires codex CLI).
+
+```bash
+# Generate workflows from directory
+stepwise codex ./examples
+
+# Use specific model
+stepwise codex --model gpt-4o .
+```
+
+### `stepwise generate`
+
+Generate test data (not yet implemented).
+
+```bash
+stepwise generate
+```
+
+### `stepwise help`
+
+Show help message.
+
+```bash
+stepwise help
+# or
+stepwise --help
+# or
+stepwise -h
+```
+
+### `stepwise version`
+
+Show version information.
+
+```bash
+stepwise version
+# or
+stepwise --version
+# or
+stepwise -v
 ```
 
 ## Command Options
-
-### Global Options
-
-```bash
---verbose, -v          Enable verbose logging
---no-color            Disable colored output
---log-level LEVEL     Set log level (debug, info, warn, error)
---timeout DURATION    Set global timeout (e.g., 30s, 5m)
-```
 
 ### Run Command Options
 
@@ -98,56 +144,12 @@ stepwise info workflow.yml --verbose
 stepwise run [OPTIONS] <FILE|DIR>
 
 Options:
-  --env ENV              Environment name (loads .env.ENV file)
-  --var KEY=VALUE        Set custom variables
-  --parallel N           Run workflows in parallel (default: 1)
-  -r, --recursive        Search recursively in subdirectories
-  --output FORMAT        Output format (text, json, html, junit)
-  --watch                Watch for file changes and re-run
-  --dry-run             Validate without executing
-  --continue-on-error   Continue execution on validation errors
-```
-
-### Validate Command Options
-
-```bash
-stepwise validate [OPTIONS] <FILE|DIR>
-
-Options:
-  --strict              Enable strict validation
-  --schema-only         Validate schema only (skip network tests)
-  --output FORMAT       Output format (text, json)
-```
-
-## Environment Variables
-
-### Stepwise Configuration
-
-```bash
-# Disable colored output
-NO_COLOR=1
-
-# Set log level
-STEPWISE_LOG_LEVEL=debug
-
-# Set default timeout
-STEPWISE_TIMEOUT=30s
-
-# Set parallel execution
-STEPWISE_PARALLEL=4
-```
-
-### CI/CD Integration
-
-```bash
-# Detect CI environment
-CI=1
-
-# Set output format for CI
-STEPWISE_OUTPUT=junit
-
-# Disable colors in CI
-NO_COLOR=1
+  --parallel, -p N        Number of parallel workflow executions (default: 1)
+  --recursive, -r         Search recursively in subdirectories
+  --verbose, -v           Enable verbose logging
+  --fail-fast, -f         Stop execution on first test failure
+  --html-report           Generate HTML report (default: test-report_TIMESTAMP.html)
+  --html-report-path PATH Path for HTML report file (used with --html-report)
 ```
 
 ## Examples
@@ -161,10 +163,8 @@ stepwise run examples/simple-test.yml
 # Run with verbose output
 stepwise run examples/simple-test.yml --verbose
 
-# Run with custom variables
-stepwise run examples/simple-test.yml \
-  --var base_url=https://api.example.com \
-  --var api_key=your-api-key
+# Run with fail-fast mode
+stepwise run examples/simple-test.yml --fail-fast
 ```
 
 ### Advanced Usage
@@ -176,14 +176,11 @@ stepwise run test-workflows/ --parallel 4
 # Run multiple workflows in parallel (recursive)
 stepwise run test-workflows/ --parallel 4 -r
 
-# Run with environment-specific config
-stepwise run workflow.yml --env staging
+# Generate HTML report
+stepwise run workflow.yml --html-report
 
-# Generate JUnit XML for CI
-stepwise run workflow.yml --output junit > results.xml
-
-# Watch mode for development
-stepwise run workflow.yml --watch
+# Generate HTML report with custom path
+stepwise run workflow.yml --html-report --html-report-path my-report.html
 ```
 
 ### CI/CD Integration
@@ -192,11 +189,10 @@ stepwise run workflow.yml --watch
 #!/bin/bash
 # GitHub Actions example
 
-# Run tests
+# Run tests with fail-fast
 stepwise run test-workflows/ \
-  --output junit \
   --parallel 4 \
-  --continue-on-error
+  --fail-fast
 
 # Check exit code
 if [ $? -eq 0 ]; then
@@ -207,30 +203,18 @@ else
 fi
 ```
 
-### Docker Integration
-
-```bash
-# Run in Docker container
-docker run --rm \
-  -v $(pwd):/workspace \
-  -w /workspace \
-  stepwise/stepwise:latest \
-  run workflow.yml
-```
-
 ## Exit Codes
 
 | Code | Description |
 |------|-------------|
 | 0    | Success - all tests passed |
 | 1    | Failure - some tests failed or error occurred |
-| 2    | Configuration error |
-| 3    | Network error |
-| 4    | Validation error |
 
-## Output Formats
+## Output
 
 ### Text Output (Default)
+
+The default output shows progress with spinners and colored output:
 
 ```
 ✅ Stepwise v1.0.0
@@ -252,115 +236,34 @@ docker run --rm \
 ⏱️  Total time: 434ms
 ```
 
-### JSON Output
+### Verbose Output
+
+When using `--verbose`, detailed debug information is shown:
 
 ```bash
-stepwise run workflow.yml --output json
+stepwise run workflow.yml --verbose
 ```
 
-```json
-{
-  "version": "1.0.0",
-  "workflow": "examples/simple-test.yml",
-  "start_time": "2024-01-15T10:30:00Z",
-  "end_time": "2024-01-15T10:30:01Z",
-  "duration": "1.2s",
-  "results": {
-    "total_steps": 2,
-    "passed": 2,
-    "failed": 0,
-    "steps": [
-      {
-        "name": "Health Check",
-        "status": "passed",
-        "duration": "245ms",
-        "request": {
-          "method": "GET",
-          "url": "https://httpbin.org/status/200"
-        },
-        "response": {
-          "status": 200,
-          "time": "245ms"
-        },
-        "validations": [
-          {
-            "type": "status",
-            "expected": 200,
-            "actual": 200,
-            "passed": true
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+This includes:
+- Detailed request/response information
+- Variable substitution details
+- Validation results
+- Error details
 
-### JUnit XML Output
+### HTML Report
+
+Generate an HTML report with test results:
 
 ```bash
-stepwise run workflow.yml --output junit > results.xml
+stepwise run workflow.yml --html-report
 ```
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuites>
-  <testsuite name="examples/simple-test.yml" tests="2" failures="0" time="1.2">
-    <testcase name="Health Check" time="0.245">
-      <system-out>GET https://httpbin.org/status/200 - 200 OK</system-out>
-    </testcase>
-    <testcase name="JSON Validation" time="0.189">
-      <system-out>GET https://httpbin.org/json - 200 OK</system-out>
-    </testcase>
-  </testsuite>
-</testsuites>
-```
+This creates a file named `test-report_TIMESTAMP.html` with detailed test results.
 
-## Configuration Files
-
-### Environment Files
-
-Create `.env` files for different environments:
+To specify a custom path:
 
 ```bash
-# .env.development
-API_BASE_URL=https://dev-api.example.com
-API_KEY=dev-key-123
-
-# .env.staging
-API_BASE_URL=https://staging-api.example.com
-API_KEY=staging-key-456
-
-# .env.production
-API_BASE_URL=https://api.example.com
-API_KEY=prod-key-789
-```
-
-### Stepwise Configuration
-
-Create `stepwise.yml` for global configuration:
-
-```yaml
-# stepwise.yml
-defaults:
-  timeout: 30s
-  parallel: 4
-  output: text
-
-environments:
-  development:
-    variables:
-      api_base_url: https://dev-api.example.com
-  staging:
-    variables:
-      api_base_url: https://staging-api.example.com
-  production:
-    variables:
-      api_base_url: https://api.example.com
-
-logging:
-  level: info
-  color: true
+stepwise run workflow.yml --html-report --html-report-path my-report.html
 ```
 
 ## Troubleshooting
@@ -402,21 +305,8 @@ logging:
 ### Debug Mode
 
 ```bash
-# Enable debug logging
-STEPWISE_LOG_LEVEL=debug stepwise run workflow.yml
-
-# Or use verbose flag
+# Use verbose flag for detailed output
 stepwise run workflow.yml --verbose
-```
-
-### Performance Issues
-
-```bash
-# Run with profiling
-STEPWISE_PROFILE=1 stepwise run workflow.yml
-
-# Check memory usage
-STEPWISE_MEMORY=1 stepwise run workflow.yml
 ```
 
 ## Best Practices
@@ -426,32 +316,28 @@ STEPWISE_MEMORY=1 stepwise run workflow.yml
 - Keep workflows in dedicated directories
 - Use descriptive file names
 - Group related workflows together
-- Use environment-specific configurations
 
 ### 2. CI/CD Integration
 
 - Use appropriate exit codes
-- Generate JUnit XML for CI systems
-- Disable colors in CI environments
-- Set reasonable timeouts
+- Use `--fail-fast` for faster feedback
+- Disable colors in CI environments (set `NO_COLOR=1`)
 
 ### 3. Performance
 
 - Use parallel execution for multiple workflows
-- Set appropriate timeouts
+- Set appropriate timeouts in workflow files
 - Monitor resource usage
-- Use caching where possible
 
 ### 4. Security
 
-- Use environment variables for secrets
+- Use environment variables for secrets (e.g., `${API_KEY}`)
 - Validate all inputs
 - Use HTTPS for all API calls
 - Implement proper authentication
 
 ### 5. Monitoring
 
-- Use structured logging
+- Use HTML reports for detailed analysis
 - Monitor execution times
 - Track success/failure rates
-- Set up alerts for failures 

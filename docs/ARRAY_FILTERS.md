@@ -1,10 +1,10 @@
-# Array Filters и Advanced JSONPath
+# Array Filters and Advanced JSONPath
 
-Stepwise поддерживает расширенный синтаксис JSONPath для работы с массивами, позволяя находить элементы по условиям, а не только по фиксированному индексу.
+Stepwise supports extended JSONPath syntax for working with arrays, allowing you to find elements by conditions rather than fixed indices.
 
-## Проблема
+## The Problem
 
-Традиционный подход с использованием индексов:
+Traditional approach using indices:
 
 ```yaml
 validate:
@@ -12,139 +12,139 @@ validate:
     equals: 123
 ```
 
-**Проблема**: Если порядок элементов в массиве изменится, тест сломается. Элемент с `id=123` может оказаться на позиции 1, 2 или любой другой.
+**Problem**: If the order of elements in the array changes, the test will break. The element with `id=123` might be at position 1, 2, or any other position.
 
-## Решение: Фильтры массивов
+## Solution: Array Filters
 
-### Базовый синтаксис фильтров
+### Basic Filter Syntax
 
 ```yaml
 validate:
-  # Найти первый элемент где id равен 123
+  # Find the first element where id equals 123
   - json: "$[?(@.id == 123)].name"
     type: "string"
 ```
 
-Здесь:
-- `$` - корень JSON
-- `[?(...)]` - фильтр массива
-- `@` - текущий элемент массива
-- `@.id == 123` - условие фильтрации
-- `.name` - поле, которое нужно извлечь из найденного элемента
+Here:
+- `$` - JSON root
+- `[?(...)]` - array filter
+- `@` - current array element
+- `@.id == 123` - filter condition
+- `.name` - field to extract from the found element
 
-## Поддерживаемые операторы сравнения
+## Supported Comparison Operators
 
-### Равенство и неравенство
+### Equality and Inequality
 
 ```yaml
-# Равенство (строки)
+# Equality (strings)
 - json: "$[?(@.status == \"active\")].id"
   type: "number"
 
-# Равенство (числа)
+# Equality (numbers)
 - json: "$[?(@.id == 42)].name"
   type: "string"
 
-# Неравенство
+# Inequality
 - json: "$[?(@.status != \"deleted\")].id"
   type: "number"
 ```
 
-### Числовые сравнения
+### Numeric Comparisons
 
 ```yaml
-# Больше
+# Greater than
 - json: "$[?(@.price > 100)].name"
   type: "string"
 
-# Меньше
+# Less than
 - json: "$[?(@.age < 30)].name"
   type: "string"
 
-# Больше или равно
+# Greater than or equal
 - json: "$[?(@.quantity >= 10)].id"
   type: "number"
 
-# Меньше или равно
+# Less than or equal
 - json: "$[?(@.rating <= 5)].title"
   type: "string"
 ```
 
-### Boolean поля
+### Boolean Fields
 
 ```yaml
-# Проверка на true (короткая форма)
+# Check for true (short form)
 - json: "$[?(@.active)].id"
   type: "number"
 
-# Проверка на true (полная форма)
+# Check for true (full form)
 - json: "$[?(@.active == true)].id"
   type: "number"
 
-# Проверка на false
+# Check for false
 - json: "$[?(@.deleted == false)].name"
   type: "string"
 ```
 
-## Доступ к вложенным полям
+## Accessing Nested Fields
 
-### Фильтрация по вложенным полям
+### Filtering by Nested Fields
 
 ```yaml
-# Найти пользователя по вложенному полю
+# Find user by nested field
 - json: "$[?(@.address.city == \"New York\")].name"
   type: "string"
 
-# Получить вложенное поле из результата
+# Get nested field from result
 - json: "$[?(@.id == 1)].address.geo.lat"
   type: "string"
 ```
 
-## Специальные селекторы
+## Special Selectors
 
-### Последний элемент
+### Last Element
 
 ```yaml
-# Получить последний элемент
+# Get last element
 - json: "$[last].id"
   type: "number"
 
-# Альтернативный синтаксис
+# Alternative syntax
 - json: "$[-1].id"
   type: "number"
 ```
 
-### Wildcard (все элементы)
+### Wildcard (All Elements)
 
 ```yaml
-# Получить весь массив
+# Get entire array
 - json: "$[*]"
   type: "array"
 
-# Проверить длину массива
+# Check array length
 - json: "$.length"
   greater: 0
 ```
 
-### Срезы массивов
+### Array Slices
 
 ```yaml
-# Получить первые 3 элемента
+# Get first 3 elements
 - json: "$[0:3]"
   type: "array"
 
-# Получить элементы с 5 по 10
+# Get elements from 5 to 10
 - json: "$[5:10]"
   type: "array"
 
-# Получить все элементы начиная с 3
+# Get all elements starting from 3
 - json: "$[3:]"
   type: "array"
 ```
 
-## Примеры использования
+## Usage Examples
 
-### Пример 1: Поиск пользователя по имени
+### Example 1: Find User by Name
 
 ```yaml
 name: "Find User by Name"
@@ -155,7 +155,7 @@ steps:
       url: "https://api.example.com/users"
     validate:
       - status: 200
-      # Найти пользователя Alice независимо от позиции в массиве
+      # Find user Alice regardless of position in array
       - json: "$[?(@.name == \"Alice\")].email"
         pattern: "^[^@]+@[^@]+\\.[^@]+$"
     capture:
@@ -163,7 +163,7 @@ steps:
       alice_email: "$[?(@.name == \"Alice\")].email"
 ```
 
-### Пример 2: Фильтрация по множественным условиям
+### Example 2: Filtering by Multiple Conditions
 
 ```yaml
 name: "Filter Products"
@@ -174,15 +174,15 @@ steps:
       url: "https://api.example.com/products"
     validate:
       - status: 200
-      # Найти первый дорогой товар
+      # Find first expensive product
       - json: "$[?(@.price > 1000)].name"
         type: "string"
-      # Найти товары в наличии
+      # Find products in stock
       - json: "$[?(@.inStock == true)].id"
         type: "number"
 ```
 
-### Пример 3: Работа с вложенными структурами
+### Example 3: Working with Nested Structures
 
 ```yaml
 name: "Complex Nested Filter"
@@ -193,15 +193,15 @@ steps:
       url: "https://api.example.com/orders"
     validate:
       - status: 200
-      # Найти заказ VIP клиента
+      # Find order from VIP customer
       - json: "$[?(@.customer.vip == true)].id"
         type: "number"
-      # Получить сумму заказа
+      # Get order total
       - json: "$[?(@.customer.vip == true)].total"
         greater: 0
 ```
 
-### Пример 4: Использование с capture
+### Example 4: Using with Capture
 
 ```yaml
 name: "Capture and Reuse"
@@ -213,7 +213,7 @@ steps:
     validate:
       - status: 200
     capture:
-      # Захватить ID активного пользователя
+      # Capture ID of active user
       active_user_id: "$[?(@.active == true)].id"
       active_user_name: "$[?(@.active == true)].name"
   
@@ -227,12 +227,12 @@ steps:
         equals: "{{active_user_id}}"
 ```
 
-## Сравнение: До и После
+## Comparison: Before and After
 
-### До (с индексами)
+### Before (with indices)
 
 ```yaml
-# Хрупкий код - зависит от порядка элементов
+# Fragile code - depends on element order
 validate:
   - json: "$[0].id"
     equals: 123
@@ -240,15 +240,15 @@ validate:
     equals: "Alice"
 ```
 
-**Проблемы:**
-- Если элементы переупорядочатся, тесты сломаются
-- Невозможно найти элемент по условию
-- Нет гибкости при изменении данных
+**Problems:**
+- If elements are reordered, tests will break
+- Cannot find element by condition
+- No flexibility when data changes
 
-### После (с фильтрами)
+### After (with filters)
 
 ```yaml
-# Надежный код - не зависит от порядка
+# Reliable code - independent of order
 validate:
   - json: "$[?(@.id == 123)].id"
     equals: 123
@@ -256,39 +256,38 @@ validate:
     equals: "Alice"
 ```
 
-**Преимущества:**
-- ✅ Не зависит от порядка элементов
-- ✅ Находит элемент по любому полю
-- ✅ Работает при изменении данных
-- ✅ Более читаемый и понятный код
+**Advantages:**
+- ✅ Independent of element order
+- ✅ Finds element by any field
+- ✅ Works when data changes
+- ✅ More readable and understandable code
 
-## Рекомендации
+## Recommendations
 
-1. **Используйте фильтры вместо индексов**, когда порядок элементов может меняться
-2. **Используйте уникальные поля** (id, email и т.д.) для фильтрации
-3. **Комбинируйте фильтры с capture** для последующего использования значений
-4. **Используйте вложенные поля** для более точной фильтрации
-5. **Проверяйте типы данных** после фильтрации для надежности
+1. **Use filters instead of indices** when element order may change
+2. **Use unique fields** (id, email, etc.) for filtering
+3. **Combine filters with capture** for subsequent value usage
+4. **Use nested fields** for more precise filtering
+5. **Check data types** after filtering for reliability
 
-## Полный пример
+## Complete Example
 
-Смотрите полный рабочий пример в файле [`examples/array-filters-demo.yml`](../examples/array-filters-demo.yml).
+See the complete working example in [`examples/array-filters-demo.yml`](../examples/array-filters-demo.yml).
 
-Запустите:
+Run:
 ```bash
 go run main.go run examples/array-filters-demo.yml
 ```
 
-## Ограничения
+## Limitations
 
-1. Фильтры возвращают **первый** найденный элемент, а не все подходящие
-2. Если элемент не найден, возвращается ошибка
-3. Сложные логические операции (AND, OR) пока не поддерживаются
-4. Регулярные выражения в фильтрах пока не поддерживаются
+1. Filters return the **first** found element, not all matching elements
+2. If element is not found, an error is returned
+3. Complex logical operations (AND, OR) are not yet supported
+4. Regular expressions in filters are not yet supported
 
-## Дополнительная информация
+## Additional Information
 
-- [JSONPath синтаксис](https://goessner.net/articles/JsonPath/)
-- [Основная документация](../README.md)
-- [Примеры workflows](../examples/)
-
+- [JSONPath syntax](https://goessner.net/articles/JsonPath/)
+- [Main documentation](../README.md)
+- [Workflow examples](../examples/)

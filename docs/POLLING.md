@@ -2,11 +2,11 @@
 
 ## Overview
 
-Polling позволяет выполнять запросы повторно до тех пор, пока не будут выполнены определенные условия. Это полезно для ожидания появления транзакций в API, проверки статусов операций и других асинхронных сценариев.
+Polling allows you to repeatedly execute requests until certain conditions are met. This is useful for waiting for transactions to appear in the API, checking operation statuses, and other asynchronous scenarios.
 
 ## Configuration
 
-Polling настраивается через поле `poll` в шаге:
+Polling is configured through the `poll` field in a step:
 
 ```yaml
 steps:
@@ -15,9 +15,9 @@ steps:
       method: "GET"
       url: "{{base_url}}/transactions/{{transaction_id}}"
     poll:
-      max_attempts: 10      # Максимальное количество попыток
-      interval: "2s"         # Задержка между попытками
-      until:                 # Условия, которые должны быть выполнены
+      max_attempts: 10      # Maximum number of attempts
+      interval: "2s"         # Delay between attempts
+      until:                 # Conditions that must be met
         - status: 200
         - json: "$.status"
           equals: "completed"
@@ -26,28 +26,28 @@ steps:
 ## Parameters
 
 ### `max_attempts` (required)
-Максимальное количество попыток поллинга. Если условие не выполнено после всех попыток, шаг завершится с ошибкой.
+Maximum number of polling attempts. If the condition is not met after all attempts, the step will fail with an error.
 
-**Default:** 10 (если не указано)
+**Default:** 10 (if not specified)
 
 ### `interval` (optional)
-Задержка между попытками поллинга. Может быть указана в формате Go duration (например, "1s", "500ms", "2m").
+Delay between polling attempts. Can be specified in Go duration format (e.g., "1s", "500ms", "2m").
 
-**Default:** 1s (если не указано)
+**Default:** 1s (if not specified)
 
 ### `until` (required)
-Массив правил валидации, которые должны быть выполнены для успешного завершения поллинга. Используется тот же синтаксис, что и в `validate`, но эти правила проверяются на каждой итерации поллинга.
+Array of validation rules that must be met for polling to complete successfully. Uses the same syntax as `validate`, but these rules are checked on each polling iteration.
 
 ## How It Works
 
-1. Шаг выполняется с конфигурацией `poll`
-2. Выполняется запрос
-3. Проверяются условия из `poll.until`
-4. Если все условия выполнены - шаг завершается успешно
-5. Если условия не выполнены:
-   - Ожидается `interval`
-   - Повторяется попытка (до `max_attempts` раз)
-6. Если после всех попыток условие не выполнено - шаг завершается с ошибкой
+1. Step is executed with `poll` configuration
+2. Request is executed
+3. Conditions from `poll.until` are checked
+4. If all conditions are met - step completes successfully
+5. If conditions are not met:
+   - Wait for `interval`
+   - Retry (up to `max_attempts` times)
+6. If condition is not met after all attempts - step fails with error
 
 ## Examples
 
@@ -121,7 +121,7 @@ steps:
 
 ## Error Handling
 
-Если поллинг не завершился успешно после всех попыток, шаг завершится с ошибкой, содержащей информацию о неудачных валидациях:
+If polling does not complete successfully after all attempts, the step will fail with an error containing information about failed validations:
 
 ```
 polling condition not met after 10 attempts: status validation failed: expected 200, got 404; json validation failed: expected completed, got pending
@@ -129,26 +129,25 @@ polling condition not met after 10 attempts: status validation failed: expected 
 
 ## Best Practices
 
-1. **Установите разумное значение `max_attempts`**: Слишком большое значение может привести к долгому ожиданию, слишком маленькое - к преждевременным ошибкам.
+1. **Set a reasonable `max_attempts` value**: Too large a value can lead to long waits, too small - to premature errors.
 
-2. **Выберите подходящий `interval`**: 
-   - Для быстрых API: 500ms - 1s
-   - Для медленных операций: 2s - 5s
-   - Не делайте слишком частые запросы, чтобы не перегружать API
+2. **Choose an appropriate `interval`**: 
+   - For fast APIs: 500ms - 1s
+   - For slow operations: 2s - 5s
+   - Don't make requests too frequent to avoid overloading the API
 
-3. **Используйте конкретные условия в `until`**: Чем точнее условия, тем быстрее поллинг завершится при достижении нужного состояния.
+3. **Use specific conditions in `until`**: The more precise the conditions, the faster polling will complete when the desired state is reached.
 
-4. **Комбинируйте с `validate`**: Вы можете использовать `validate` для дополнительных проверок после успешного поллинга.
+4. **Combine with `validate`**: You can use `validate` for additional checks after successful polling.
 
 ## Differences from Retry
 
-- **Retry** (`retry`): Повторяет запрос при ошибке (например, сетевые ошибки, таймауты)
-- **Polling** (`poll`): Повторяет запрос до выполнения определенных условий в ответе
+- **Retry** (`retry`): Repeats request on error (e.g., network errors, timeouts)
+- **Polling** (`poll`): Repeats request until certain conditions in the response are met
 
 ## Notes
 
-- Поллинг работает как с HTTP, так и с gRPC запросами
-- Условия в `poll.until` проверяются на каждой итерации
-- Если запрос завершается с ошибкой (сетевая ошибка, таймаут), поллинг продолжается до `max_attempts`
-- Время выполнения шага включает все попытки поллинга
-
+- Polling works with both HTTP and gRPC requests
+- Conditions in `poll.until` are checked on each iteration
+- If request fails with an error (network error, timeout), polling continues until `max_attempts`
+- Step execution time includes all polling attempts

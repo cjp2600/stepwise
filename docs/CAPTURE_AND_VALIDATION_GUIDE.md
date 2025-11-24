@@ -1,53 +1,53 @@
-# Руководство по захвату переменных и валидации
+# Variable Capture and Validation Guide
 
-## Обзор
+## Overview
 
-Stepwise предоставляет мощные возможности для захвата данных из ответов API и их последующего использования в валидации и других шагах workflow.
+Stepwise provides powerful capabilities for capturing data from API responses and using it in subsequent validation and workflow steps.
 
-## Основные возможности
+## Core Features
 
-### ✅ 1. Захват переменных (Capture)
+### ✅ 1. Variable Capture
 
-Вы можете захватывать данные из JSON ответов используя JSONPath:
+You can capture data from JSON responses using JSONPath:
 
 ```yaml
 steps:
-  - name: "Получить пользователя"
+  - name: "Get User"
     request:
       method: "GET"
       url: "https://api.example.com/users/1"
     capture:
-      user_id: "$.id"              # Захватываем ID
-      user_name: "$.name"          # Захватываем имя
-      user_email: "$.email"        # Захватываем email
-      user_city: "$.address.city"  # Захватываем вложенное поле
+      user_id: "$.id"              # Capture ID
+      user_name: "$.name"          # Capture name
+      user_email: "$.email"        # Capture email
+      user_city: "$.address.city"  # Capture nested field
 ```
 
-### ✅ 2. Использование захваченных переменных
+### ✅ 2. Using Captured Variables
 
-Захваченные переменные доступны во всех последующих шагах:
+Captured variables are available in all subsequent steps:
 
 ```yaml
-  - name: "Использовать захваченные данные"
+  - name: "Use Captured Data"
     request:
       method: "GET"
-      url: "https://api.example.com/users/{{user_id}}"  # Используем в URL
+      url: "https://api.example.com/users/{{user_id}}"  # Use in URL
       headers:
-        X-User-Name: "{{user_name}}"  # Используем в заголовках
+        X-User-Name: "{{user_name}}"  # Use in headers
 ```
 
-### ✅ 3. Сравнение в валидации
+### ✅ 3. Comparison in Validation
 
-Самая важная возможность - сравнение данных из ответа с захваченными переменными:
+The most important feature - comparing response data with captured variables:
 
 ```yaml
-  - name: "Проверить данные"
+  - name: "Verify Data"
     request:
       method: "GET"
       url: "https://api.example.com/users/{{user_id}}"
     validate:
       - status: 200
-      # Сравниваем каждое поле с захваченными переменными
+      # Compare each field with captured variables
       - json: "$.id"
         equals: "{{user_id}}"
       - json: "$.name"
@@ -58,16 +58,16 @@ steps:
         equals: "{{user_city}}"
 ```
 
-## Практические примеры
+## Practical Examples
 
-### Пример 1: Простой захват и сравнение
+### Example 1: Simple Capture and Comparison
 
 ```yaml
 name: "Simple Capture Example"
 version: "1.0"
 
 steps:
-  # Шаг 1: Получаем пользователя и захватываем данные
+  # Step 1: Get user and capture data
   - name: "Get User"
     request:
       method: "GET"
@@ -78,7 +78,7 @@ steps:
       saved_name: "$.name"
       saved_email: "$.email"
 
-  # Шаг 2: Снова получаем того же пользователя и проверяем
+  # Step 2: Get the same user again and verify
   - name: "Verify User Data"
     request:
       method: "GET"
@@ -86,30 +86,30 @@ steps:
     validate:
       - status: 200
       - json: "$.name"
-        equals: "{{saved_name}}"    # Сравниваем с захваченным
+        equals: "{{saved_name}}"    # Compare with captured
       - json: "$.email"
-        equals: "{{saved_email}}"   # Сравниваем с захваченным
+        equals: "{{saved_email}}"   # Compare with captured
 ```
 
-### Пример 2: Захват из массива с фильтрацией
+### Example 2: Capture from Array with Filtering
 
 ```yaml
 name: "Array Filter Capture"
 version: "1.0"
 
 steps:
-  # Шаг 1: Получаем массив и захватываем данные конкретного элемента
+  # Step 1: Get array and capture data from specific element
   - name: "Get Posts Array"
     request:
       method: "GET"
       url: "https://jsonplaceholder.typicode.com/posts"
     capture:
-      # Используем JSONPath фильтры
+      # Use JSONPath filters
       post_5_title: "$[?(@.id == 5)].title"
       post_5_body: "$[?(@.id == 5)].body"
       post_5_user_id: "$[?(@.id == 5)].userId"
 
-  # Шаг 2: Получаем конкретный пост и сравниваем
+  # Step 2: Get specific post and compare
   - name: "Verify Post Data"
     request:
       method: "GET"
@@ -117,21 +117,21 @@ steps:
     validate:
       - status: 200
       - json: "$.title"
-        equals: "{{post_5_title}}"     # Сравниваем с данными из массива
+        equals: "{{post_5_title}}"     # Compare with data from array
       - json: "$.body"
         equals: "{{post_5_body}}"
       - json: "$.userId"
         equals: "{{post_5_user_id}}"
 ```
 
-### Пример 3: Цепочка запросов с захватом
+### Example 3: Chained Requests with Capture
 
 ```yaml
 name: "Chained Requests"
 version: "1.0"
 
 steps:
-  # Шаг 1: Получаем пост и захватываем ID автора
+  # Step 1: Get post and capture author ID
   - name: "Get Post"
     request:
       method: "GET"
@@ -139,7 +139,7 @@ steps:
     capture:
       author_id: "$.userId"
 
-  # Шаг 2: Используем захваченный ID для получения автора
+  # Step 2: Use captured ID to get author
   - name: "Get Author"
     request:
       method: "GET"
@@ -147,12 +147,12 @@ steps:
     validate:
       - status: 200
       - json: "$.id"
-        equals: "{{author_id}}"  # Проверяем правильность ID
+        equals: "{{author_id}}"  # Verify ID correctness
     capture:
       author_name: "$.name"
       author_email: "$.email"
 
-  # Шаг 3: Используем все захваченные данные
+  # Step 3: Use all captured data
   - name: "Use All Captured Data"
     request:
       method: "GET"
@@ -164,7 +164,7 @@ steps:
       - status: 200
 ```
 
-### Пример 4: Вложенные поля
+### Example 4: Nested Fields
 
 ```yaml
 name: "Nested Fields Capture"
@@ -176,7 +176,7 @@ steps:
       method: "GET"
       url: "https://jsonplaceholder.typicode.com/users/1"
     capture:
-      # Захват вложенных полей
+      # Capture nested fields
       user_city: "$.address.city"
       user_street: "$.address.street"
       user_lat: "$.address.geo.lat"
@@ -189,7 +189,7 @@ steps:
       url: "https://jsonplaceholder.typicode.com/users/1"
     validate:
       - status: 200
-      # Сравниваем вложенные поля
+      # Compare nested fields
       - json: "$.address.city"
         equals: "{{user_city}}"
       - json: "$.address.street"
@@ -202,9 +202,9 @@ steps:
         equals: "{{company_name}}"
 ```
 
-## Использование с компонентами
+## Using with Components
 
-### Создание компонента с захватом
+### Creating Component with Capture
 
 ```yaml
 # components/get-user-component.yml
@@ -228,7 +228,7 @@ steps:
       user_city: "$.address.city"
 ```
 
-### Использование компонента и его переменных
+### Using Component and Its Variables
 
 ```yaml
 name: "Component Usage"
@@ -239,13 +239,13 @@ imports:
     alias: "get-user"
 
 steps:
-  # Используем компонент - он захватит переменные
+  # Use component - it will capture variables
   - name: "Get User via Component"
     use: 'get-user'
     variables:
       user_id: "5"
 
-  # Переменные из компонента доступны в следующих шагах
+  # Variables from component are available in next steps
   - name: "Verify Captured Data"
     request:
       method: "GET"
@@ -253,61 +253,61 @@ steps:
     validate:
       - status: 200
       - json: "$.name"
-        equals: "{{user_name}}"    # Используем переменную из компонента
+        equals: "{{user_name}}"    # Use variable from component
       - json: "$.email"
         equals: "{{user_email}}"
 ```
 
-## Продвинутые JSONPath фильтры
+## Advanced JSONPath Filters
 
-### Фильтрация по условию
+### Filtering by Condition
 
 ```yaml
 capture:
-  # Равенство
+  # Equality
   item_with_id_5: "$[?(@.id == 5)]"
   
-  # Больше чем
+  # Greater than
   high_id_items: "$[?(@.id > 95)]"
   
-  # Меньше чем
+  # Less than
   low_price_items: "$[?(@.price < 100)]"
   
-  # Несколько условий
+  # Multiple conditions
   specific_item: "$[?(@.id == 5 && @.active == true)]"
 ```
 
-### Специальные селекторы
+### Special Selectors
 
 ```yaml
 capture:
-  # Первый элемент
+  # First element
   first_item: "$[0]"
   
-  # Последний элемент
+  # Last element
   last_item: "$[-1]"
   
-  # Диапазон элементов
+  # Element range
   first_three: "$[0:3]"
   
-  # Все элементы
+  # All elements
   all_items: "$[*]"
 ```
 
-### Вложенные фильтры
+### Nested Filters
 
 ```yaml
 capture:
-  # Фильтр с вложенным полем
+  # Filter with nested field
   user_in_paris: "$[?(@.address.city == 'Paris')].name"
   
-  # Глубоко вложенное поле после фильтра
+  # Deeply nested field after filter
   latitude: "$[?(@.id == 1)].address.geo.lat"
 ```
 
-## Типы валидации с переменными
+## Validation Types with Variables
 
-### 1. Прямое сравнение (equals)
+### 1. Direct Comparison (equals)
 
 ```yaml
 validate:
@@ -315,7 +315,7 @@ validate:
     equals: "{{user_id}}"
 ```
 
-### 2. Проверка типа
+### 2. Type Check
 
 ```yaml
 validate:
@@ -325,7 +325,7 @@ validate:
     type: "number"
 ```
 
-### 3. Регулярное выражение
+### 3. Regular Expression
 
 ```yaml
 validate:
@@ -333,7 +333,7 @@ validate:
     pattern: "^[^@]+@[^@]+\\.[^@]+$"
 ```
 
-### 4. Комбинация проверок
+### 4. Combination of Checks
 
 ```yaml
 validate:
@@ -350,52 +350,52 @@ validate:
 
 ## Best Practices
 
-### 1. Именование переменных
+### 1. Variable Naming
 
-Используйте осмысленные имена:
+Use meaningful names:
 
 ```yaml
-# ✅ Хорошо
+# ✅ Good
 capture:
   user_id: "$.id"
   user_email: "$.email"
   created_at: "$.createdAt"
 
-# ❌ Плохо
+# ❌ Bad
 capture:
   id: "$.id"
   e: "$.email"
   t: "$.createdAt"
 ```
 
-### 2. Префиксы для ясности
+### 2. Prefixes for Clarity
 
 ```yaml
 capture:
-  saved_user_id: "$.id"        # Сохраненный ID
-  current_user_name: "$.name"  # Текущее имя
-  original_email: "$.email"    # Оригинальный email
+  saved_user_id: "$.id"        # Saved ID
+  current_user_name: "$.name"  # Current name
+  original_email: "$.email"    # Original email
 ```
 
-### 3. Группировка связанных данных
+### 3. Grouping Related Data
 
 ```yaml
 capture:
-  # Данные пользователя
+  # User data
   user_id: "$.id"
   user_name: "$.name"
   user_email: "$.email"
   
-  # Данные адреса
+  # Address data
   address_city: "$.address.city"
   address_street: "$.address.street"
   
-  # Геоданные
+  # Geo data
   geo_lat: "$.address.geo.lat"
   geo_lng: "$.address.geo.lng"
 ```
 
-### 4. Валидация перед использованием
+### 4. Validate Before Using
 
 ```yaml
 steps:
@@ -405,7 +405,7 @@ steps:
       url: "https://api.example.com/users/1"
     validate:
       - status: 200
-      # Проверяем, что поля существуют
+      # Check that fields exist
       - json: "$.id"
         type: "number"
       - json: "$.name"
@@ -415,9 +415,9 @@ steps:
       user_name: "$.name"
 ```
 
-## Распространенные паттерны
+## Common Patterns
 
-### Паттерн 1: Создать → Проверить
+### Pattern 1: Create → Verify
 
 ```yaml
 steps:
@@ -442,7 +442,7 @@ steps:
         equals: "{{created_name}}"
 ```
 
-### Паттерн 2: Получить список → Получить детали
+### Pattern 2: Get List → Get Details
 
 ```yaml
 steps:
@@ -462,7 +462,7 @@ steps:
         equals: "{{first_item_id}}"
 ```
 
-### Паттерн 3: Связанные ресурсы
+### Pattern 3: Related Resources
 
 ```yaml
 steps:
@@ -489,16 +489,15 @@ steps:
         equals: "{{post_author_id}}"
 ```
 
-## Заключение
+## Conclusion
 
-Stepwise предоставляет полный набор инструментов для:
+Stepwise provides a complete set of tools for:
 
-✅ Захвата данных из JSON ответов  
-✅ Использования захваченных переменных в последующих запросах  
-✅ Валидации данных путем сравнения с захваченными переменными  
-✅ Работы с вложенными структурами данных  
-✅ Фильтрации массивов с помощью JSONPath  
-✅ Переиспользования компонентов с захватом переменных  
+✅ Capturing data from JSON responses  
+✅ Using captured variables in subsequent requests  
+✅ Validating data by comparing with captured variables  
+✅ Working with nested data structures  
+✅ Filtering arrays using JSONPath  
+✅ Reusing components with variable capture  
 
-Все эти возможности делают Stepwise мощным инструментом для тестирования API!
-
+All these capabilities make Stepwise a powerful tool for API testing!

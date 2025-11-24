@@ -207,31 +207,18 @@ stepwise validate workflow.yml
 # Show workflow information
 stepwise info workflow.yml
 
-# Generate test data
-stepwise generate --type user --count 10
+# Generate test data (not yet implemented)
+stepwise generate
 ```
 
 ### Advanced Options
 
 ```bash
-# Run with environment variables
-stepwise run workflow.yml --env production
-
-# Set custom variables
-stepwise run workflow.yml --var base_url=https://api.example.com
-
 # Run with parallel execution
-stepwise run workflow.yml --parallel 4
+stepwise run test-workflows/ --parallel 4
 
-# Run with custom timeout
-stepwise run workflow.yml --timeout 30s
-
-# Generate different output formats
-stepwise run workflow.yml --output json
-stepwise run workflow.yml --output html
-
-# Watch mode for development
-stepwise run workflow.yml --watch
+# Run with recursive directory search
+stepwise run test-workflows/ --recursive
 
 # Run with verbose logging
 stepwise run workflow.yml --verbose
@@ -239,6 +226,12 @@ stepwise run workflow.yml --verbose
 # Fail-fast mode (stop on first failure) - useful for CI/CD
 stepwise run workflow.yml --fail-fast
 stepwise run workflow.yml -f
+
+# Generate HTML report
+stepwise run workflow.yml --html-report
+
+# Generate HTML report with custom path
+stepwise run workflow.yml --html-report --html-report-path my-report.html
 
 # Disable colors for CI
 NO_COLOR=1 stepwise run workflow.yml
@@ -633,19 +626,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Stepwise** - Making API testing simple, powerful, and accessible. 
-
-## Установка CLI
-
-Установить CLI можно одной командой:
-
-```sh
-go install github.com/cjp2600/stepwise@latest
-```
-
-После этого бинарник появится в вашем $GOPATH/bin или $GOBIN.
-
-## Использование
-
-```sh
-stepwise [аргументы]
-``` 

@@ -32,7 +32,7 @@ Stepwise is designed as a modular, extensible API testing framework with a clear
 
 ## Core Components
 
-### 1. CLI Layer (`cmd/stepwise/`)
+### 1. CLI Layer (`internal/cli/`)
 
 The CLI layer provides the user interface and command handling.
 
@@ -43,7 +43,7 @@ The CLI layer provides the user interface and command handling.
 - Manage user interaction
 
 **Key Files:**
-- `cmd/stepwise/main.go` - Application entry point
+- `main.go` - Application entry point
 - `internal/cli/app.go` - CLI application logic
 
 ### 2. Workflow Engine (`internal/workflow/`)
@@ -104,35 +104,25 @@ The validation engine handles all response validation.
 **Responsibilities:**
 - Validate HTTP status codes
 - Validate JSON responses using JSONPath
-- Validate XML responses using XPath
 - Validate response times
-- Execute custom validation functions
 - Generate validation reports
 
 **Validation Types:**
 - Status code validation
 - JSON path validation
-- XML path validation
 - Time validation
-- Custom matchers
 - Pattern matching
 - Type checking
+- Comparison operators (equals, greater, less, etc.)
 
-### 5. Data Generation (`internal/generator/`)
+### 5. Data Generation
 
-The data generation component provides mock data and test data management.
-
-**Responsibilities:**
-- Generate fake data (names, emails, UUIDs, etc.)
-- Load data from external sources (CSV, JSON, XML)
-- Transform data according to templates
-- Manage data sets for data-driven testing
+Data generation is handled through variable substitution with faker functions.
 
 **Features:**
-- Built-in faker functions
-- Custom data generators
-- External data source integration
-- Template-based data transformation
+- Built-in faker functions (e.g., `{{faker.name}}`, `{{faker.email}}`, `{{faker.uuid}}`)
+- Number generation with ranges (e.g., `{{faker.number(1, 100)}}`)
+- Variable substitution in requests and validation
 
 ### 6. Configuration Management (`internal/config/`)
 
@@ -378,21 +368,17 @@ func (r *HTMLReporter) Report(results []TestResult) error {
 
 - Basic authentication
 - Bearer token authentication
-- OAuth 2.0 support
-- API key authentication
+- API key authentication (via headers)
 
 ### 2. SSL/TLS
 
+- Standard Go TLS support
 - Certificate validation
-- Custom CA certificates
-- Client certificate support
-- SSL verification options
 
 ### 3. Secrets Management
 
-- Environment variable support
-- External secrets management integration
-- Secure credential storage
+- Environment variable support (e.g., `${API_KEY}`)
+- Variable substitution in workflows
 
 ## Testing Strategy
 
