@@ -115,25 +115,77 @@ func (c *Client) Execute(req *Request) (*Response, error) {
 			c.logger.Debug("Service lookup via FindSymbol failed, trying ListServices and ResolveService", "error", svcErr)
 			// Try listing services to find the correct one
 			// This is necessary for services without package declaration
-			services, listErr := descSource.ListServices()
+			// Use rc.ListServices() directly (same as in tests) instead of descSource.ListServices()
+			services, listErr := rc.ListServices()
 			if listErr != nil {
 				c.logger.Debug("List services failed", "error", listErr)
 				return nil, fmt.Errorf("failed to find method %s: %w", methodName, err)
 			}
 			
+			c.logger.Debug("ListServices returned services", "count", len(services), "services", services)
+			
 			// Find the service by name using ResolveService (works for services without package)
+			// Try exact match first, then try partial match (service name at the end)
+			foundServiceName := ""
 			for _, svcName := range services {
+				c.logger.Debug("Checking service", "name", svcName, "looking_for", req.Service)
+				// Try exact match
 				if svcName == req.Service {
+					foundServiceName = svcName
 					service, svcErr = rc.ResolveService(svcName)
-					if svcErr == nil && service != nil {
-						c.logger.Debug("Found service via ResolveService", "service", svcName)
+					if svcErr != nil {
+						c.logger.Debug("ResolveService failed", "service", svcName, "error", svcErr)
+						continue
+					}
+					if service != nil {
+						c.logger.Debug("Found service via ResolveService (exact match)", "service", svcName)
 						break
+					} else {
+						c.logger.Debug("ResolveService returned nil service", "service", svcName)
+					}
+				}
+			}
+			
+			// If exact match not found, try to find service by suffix match
+			// This handles cases like "package.OperationService" when looking for "OperationService"
+			if service == nil {
+				for _, svcName := range services {
+					// Check if service name ends with the requested service name (with or without package prefix)
+					// Examples: "OperationService" matches "OperationService"
+					//           "some.package.OperationService" matches "OperationService"
+					if svcName == req.Service {
+						// Already tried exact match above
+						continue
+					}
+					// Check if it ends with ".ServiceName" or just "ServiceName"
+					if len(svcName) >= len(req.Service) {
+						suffix := svcName[len(svcName)-len(req.Service):]
+						if suffix == req.Service {
+							// Make sure it's a valid match (either exact or with package prefix)
+							if len(svcName) == len(req.Service) || svcName[len(svcName)-len(req.Service)-1] == '.' {
+								c.logger.Debug("Trying suffix match", "service", svcName, "looking_for", req.Service)
+								foundServiceName = svcName
+								service, svcErr = rc.ResolveService(svcName)
+								if svcErr != nil {
+									c.logger.Debug("ResolveService failed (suffix match)", "service", svcName, "error", svcErr)
+									service = nil // Reset to try next
+									continue
+								}
+								if service != nil {
+									c.logger.Debug("Found service via ResolveService (suffix match)", "service", svcName)
+									break
+								}
+							}
+						}
 					}
 				}
 			}
 			
 			if service == nil {
-				return nil, fmt.Errorf("failed to find service %s: %w", req.Service, svcErr)
+				if foundServiceName != "" {
+					return nil, fmt.Errorf("failed to resolve service %s (found in list but ResolveService failed): %w", foundServiceName, svcErr)
+				}
+				return nil, fmt.Errorf("failed to find service %s in list of %d services: %v", req.Service, len(services), services)
 			}
 		} else {
 			// Found service via FindSymbol, convert to ServiceDescriptor

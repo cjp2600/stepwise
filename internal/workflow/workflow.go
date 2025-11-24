@@ -156,6 +156,7 @@ type Executor struct {
 	logger           *logger.Logger
 	httpClient       *httpclient.Client
 	grpcClient       *grpcclient.Client
+	grpcServerAddr   string // Track current gRPC server address to detect changes
 	dbClient         *dbclient.Client
 	validator        *validation.Validator
 	varManager       *variables.Manager
@@ -720,14 +721,22 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		e.logger.Debug("Executing request", "protocol", substitutedReq.Protocol)
 
 		if substitutedReq.Protocol == "grpc" {
-			// Initialize gRPC client if not already done
-			if e.grpcClient == nil {
+			// Initialize gRPC client if not already done or if server address changed
+			// Need to create new client for each different server address
+			if e.grpcClient == nil || e.grpcServerAddr != substitutedReq.ServerAddr {
+				// Close old client if exists and server address changed
+				if e.grpcClient != nil && e.grpcServerAddr != substitutedReq.ServerAddr {
+					e.grpcClient.Close()
+					e.logger.Debug("Closing gRPC client for different server", "old_server", e.grpcServerAddr, "new_server", substitutedReq.ServerAddr)
+				}
 				grpcClient, err := grpcclient.NewClient(substitutedReq.ServerAddr, substitutedReq.Insecure, e.logger)
 				if err != nil {
 					lastError = fmt.Errorf("failed to create gRPC client: %w", err)
 					continue
 				}
 				e.grpcClient = grpcClient
+				e.grpcServerAddr = substitutedReq.ServerAddr
+				e.logger.Debug("Created new gRPC client", "server", substitutedReq.ServerAddr)
 			}
 
 			// Execute gRPC request
@@ -1039,8 +1048,14 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 		var requestErr error
 
 		if substitutedReq.Protocol == "grpc" {
-			// Initialize gRPC client if not already done
-			if e.grpcClient == nil {
+			// Initialize gRPC client if not already done or if server address changed
+			// Need to create new client for each different server address
+			if e.grpcClient == nil || e.grpcServerAddr != substitutedReq.ServerAddr {
+				// Close old client if exists and server address changed
+				if e.grpcClient != nil && e.grpcServerAddr != substitutedReq.ServerAddr {
+					e.grpcClient.Close()
+					e.logger.Debug("Closing gRPC client for different server (polling)", "old_server", e.grpcServerAddr, "new_server", substitutedReq.ServerAddr)
+				}
 				grpcClient, err := grpcclient.NewClient(substitutedReq.ServerAddr, substitutedReq.Insecure, e.logger)
 				if err != nil {
 					lastError = fmt.Errorf("failed to create gRPC client: %w", err)
@@ -1050,6 +1065,8 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 					continue
 				}
 				e.grpcClient = grpcClient
+				e.grpcServerAddr = substitutedReq.ServerAddr
+				e.logger.Debug("Created new gRPC client (polling)", "server", substitutedReq.ServerAddr)
 			}
 
 			// Execute gRPC request
