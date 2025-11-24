@@ -1,0 +1,82 @@
+name: "Test show_response in all scenarios"
+
+version: "1.0"
+
+description: "Test show_response directive in various scenarios: success, validation failure, request error, and polling"
+
+steps:
+  # Test 1: Successful request with show_response
+  - name: "Test 1: Successful HTTP request with show_response"
+    show_response: true
+    request:
+      method: "GET"
+      url: "https://httpbin.org/json"
+    validate:
+      - status: 200
+
+  # Test 2: Request with validation failure - should still show response
+  - name: "Test 2: Request with validation failure (should show response)"
+    show_response: true
+    request:
+      method: "GET"
+      url: "https://httpbin.org/json"
+    validate:
+      - status: 404  # This will fail, but response should still be shown
+
+  # Test 3: Request error - should show response if available
+  - name: "Test 3: Request error (should show response if available)"
+    show_response: true
+    request:
+      method: "GET"
+      url: "https://httpbin.org/status/500"
+    validate:
+      - status: 200  # This will fail
+
+  # Test 4: Polling with show_response - should show on each attempt
+  - name: "Test 4: Polling with show_response (should show on each attempt)"
+    show_response: true
+    request:
+      method: "GET"
+      url: "https://httpbin.org/json"
+    poll:
+      max_attempts: 3
+      interval: "1s"
+      until:
+        - status: 200
+        - json: "$.slideshow"
+          notEmpty: true
+
+  # Test 5: Polling with condition that fails - should still show response
+  - name: "Test 5: Polling with failing condition (should show response)"
+    show_response: true
+    request:
+      method: "GET"
+      url: "https://httpbin.org/json"
+    poll:
+      max_attempts: 2
+      interval: "1s"
+      until:
+        - status: 200
+        - json: "$.nonexistent"
+          notEmpty: true  # This will fail, but response should be shown
+
+  # Test 6: gRPC request with show_response (if you have gRPC server)
+  # - name: "Test 6: gRPC request with show_response"
+  #   show_response: true
+  #   request:
+  #     protocol: "grpc"
+  #     server_addr: "localhost:50051"
+  #     service: "TestService"
+  #     method: "TestMethod"
+  #     data:
+  #       message: "test"
+
+  # Test 7: Request without show_response (should not show)
+  - name: "Test 7: Request without show_response (should NOT show response)"
+    show_response: false
+    request:
+      method: "GET"
+      url: "https://httpbin.org/json"
+    validate:
+      - status: 200
+

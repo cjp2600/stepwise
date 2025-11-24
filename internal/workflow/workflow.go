@@ -832,6 +832,11 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 						fmt.Println(string(jsonData))
 						fmt.Println("================ END RESPONSE ================")
 					}
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE (gRPC) ================")
+					fmt.Printf("Error: %v\n", requestErr)
+					fmt.Println("================ END RESPONSE ================")
 				}
 			} else if substitutedReq.Protocol == "db" {
 				if dbResponse != nil {
@@ -841,11 +846,27 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 						fmt.Println(string(jsonData))
 						fmt.Println("================ END RESPONSE ================")
 					}
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE (DB) ================")
+					fmt.Printf("Error: %v\n", requestErr)
+					fmt.Println("================ END RESPONSE ================")
 				}
 			} else {
-				if httpResponse != nil && len(httpResponse.Body) > 0 {
+				if httpResponse != nil {
 					fmt.Println("================ RESPONSE ================")
-					fmt.Println(string(httpResponse.Body))
+					fmt.Printf("Status Code: %d\n", httpResponse.StatusCode)
+					if len(httpResponse.Body) > 0 {
+						fmt.Println("Body:")
+						fmt.Println(string(httpResponse.Body))
+					} else {
+						fmt.Println("Body: (empty)")
+					}
+					fmt.Println("================ END RESPONSE ================")
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE ================")
+					fmt.Printf("Error: %v\n", requestErr)
 					fmt.Println("================ END RESPONSE ================")
 				}
 			}
@@ -1150,6 +1171,11 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 						fmt.Println(string(jsonData))
 						fmt.Println("================ END RESPONSE ================")
 					}
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE (gRPC) ================")
+					fmt.Printf("Error: %v\n", requestErr)
+					fmt.Println("================ END RESPONSE ================")
 				}
 			} else if substitutedReq.Protocol == "db" {
 				if dbResponse != nil {
@@ -1159,11 +1185,27 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 						fmt.Println(string(jsonData))
 						fmt.Println("================ END RESPONSE ================")
 					}
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE (DB) ================")
+					fmt.Printf("Error: %v\n", requestErr)
+					fmt.Println("================ END RESPONSE ================")
 				}
 			} else {
-				if httpResponse != nil && len(httpResponse.Body) > 0 {
+				if httpResponse != nil {
 					fmt.Println("================ RESPONSE ================")
-					fmt.Println(string(httpResponse.Body))
+					fmt.Printf("Status Code: %d\n", httpResponse.StatusCode)
+					if len(httpResponse.Body) > 0 {
+						fmt.Println("Body:")
+						fmt.Println(string(httpResponse.Body))
+					} else {
+						fmt.Println("Body: (empty)")
+					}
+					fmt.Println("================ END RESPONSE ================")
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE ================")
+					fmt.Printf("Error: %v\n", requestErr)
 					fmt.Println("================ END RESPONSE ================")
 				}
 			}
