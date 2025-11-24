@@ -822,16 +822,7 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			httpResponse, requestErr = e.httpClient.Execute(httpReq)
 		}
 
-		if requestErr != nil {
-			lastError = fmt.Errorf("request failed: %w", requestErr)
-			// Log API response on request error when verbose is enabled (if response exists)
-			if !e.logger.IsMuted() {
-				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
-			}
-			continue
-		}
-
-		// Show response if requested (always show, regardless of validation results)
+		// Show response if requested (always show, even on errors)
 		if step.ShowResponse {
 			if substitutedReq.Protocol == "grpc" {
 				if grpcResponse != nil {
@@ -858,6 +849,15 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 					fmt.Println("================ END RESPONSE ================")
 				}
 			}
+		}
+
+		if requestErr != nil {
+			lastError = fmt.Errorf("request failed: %w", requestErr)
+			// Log API response on request error when verbose is enabled (if response exists)
+			if !e.logger.IsMuted() {
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
+			}
+			continue
 		}
 
 		// Run validations
@@ -1140,6 +1140,35 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			}
 		}
 
+		// Show response if requested (always show, even on errors)
+		if step.ShowResponse {
+			if substitutedReq.Protocol == "grpc" {
+				if grpcResponse != nil {
+					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (gRPC) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else if substitutedReq.Protocol == "db" {
+				if dbResponse != nil {
+					jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (DB) ================")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				}
+			} else {
+				if httpResponse != nil && len(httpResponse.Body) > 0 {
+					fmt.Println("================ RESPONSE ================")
+					fmt.Println(string(httpResponse.Body))
+					fmt.Println("================ END RESPONSE ================")
+				}
+			}
+		}
+
 		if requestErr != nil {
 			lastError = fmt.Errorf("request failed: %w", requestErr)
 			e.logger.Debug("Polling attempt failed", "step", step.Name, "attempt", attempt, "error", requestErr)
@@ -1190,35 +1219,6 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			}
 		} else {
 			responseForValidation = httpResponse
-		}
-
-		// Show response if requested (always show, regardless of validation results)
-		if step.ShowResponse {
-			if substitutedReq.Protocol == "grpc" {
-				if grpcResponse != nil {
-					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
-					if err == nil {
-						fmt.Println("================ RESPONSE (gRPC) ================")
-						fmt.Println(string(jsonData))
-						fmt.Println("================ END RESPONSE ================")
-					}
-				}
-			} else if substitutedReq.Protocol == "db" {
-				if dbResponse != nil {
-					jsonData, err := json.MarshalIndent(dbResponse.Data, "", "  ")
-					if err == nil {
-						fmt.Println("================ RESPONSE (DB) ================")
-						fmt.Println(string(jsonData))
-						fmt.Println("================ END RESPONSE ================")
-					}
-				}
-			} else {
-				if httpResponse != nil && len(httpResponse.Body) > 0 {
-					fmt.Println("================ RESPONSE ================")
-					fmt.Println(string(httpResponse.Body))
-					fmt.Println("================ END RESPONSE ================")
-				}
-			}
 		}
 
 		// Validate against poll.until conditions
