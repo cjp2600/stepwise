@@ -1,0 +1,139 @@
+name: "MCP Test Workflow"
+version: "1.0"
+description: "Test workflow for MCP protocol using local test server"
+
+variables:
+  mcp_server_url: "http://localhost:8080/mcp"
+
+steps:
+  - name: "Initialize MCP Connection"
+    description: "Initialize connection to MCP test server"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "initialize"
+      timeout: "10s"
+    validate:
+      - json: "$.serverInfo.name"
+        equals: "stepwise-test-server"
+    show_response: true
+
+  - name: "List Available Tools"
+    description: "Get list of available MCP tools"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "tools/list"
+      timeout: "10s"
+    validate:
+      - json: "$.tools"
+        type: "array"
+      - json: "$.tools[0].name"
+        equals: "weather"
+    capture:
+      tool_count: "$.tools.length()"
+      first_tool_name: "$.tools[0].name"
+    show_response: true
+
+  - name: "Call Weather Tool"
+    description: "Call weather tool with parameters"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "tools/call"
+      mcp_params:
+        name: "weather"
+        arguments:
+          location: "Moscow"
+          units: "celsius"
+      timeout: "10s"
+    validate:
+      - json: "$.content"
+        type: "array"
+    capture:
+      weather_result: "$.content[0].text"
+    show_response: true
+
+  - name: "Call Calculator Tool"
+    description: "Call calculator tool"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "tools/call"
+      mcp_params:
+        name: "calculator"
+        arguments:
+          expression: "2 + 2 * 2"
+      timeout: "10s"
+    validate:
+      - json: "$.content"
+        type: "array"
+    show_response: true
+
+  - name: "List Resources"
+    description: "Get list of available resources"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "resources/list"
+      timeout: "10s"
+    validate:
+      - json: "$.resources"
+        type: "array"
+    capture:
+      resource_count: "$.resources.length()"
+    show_response: true
+
+  - name: "Read Resource"
+    description: "Read a resource by URI"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "resources/read"
+      mcp_params:
+        uri: "file:///tmp/data.json"
+      timeout: "10s"
+    validate:
+      - json: "$.contents"
+        type: "array"
+    capture:
+      resource_content: "$.contents[0].text"
+    show_response: true
+
+  - name: "List Prompts"
+    description: "Get list of available prompts"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "prompts/list"
+      timeout: "10s"
+    validate:
+      - json: "$.prompts"
+        type: "array"
+    show_response: true
+
+  - name: "Get Code Review Prompt"
+    description: "Get code review prompt with arguments"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "prompts/get"
+      mcp_params:
+        name: "code_review"
+        arguments:
+          code: "function test() { return true; }"
+          language: "javascript"
+      timeout: "10s"
+    validate:
+      - json: "$.messages"
+        type: "array"
+    show_response: true
+

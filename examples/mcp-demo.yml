@@ -1,0 +1,125 @@
+name: "MCP Protocol Demo"
+version: "1.0"
+description: "Demonstrates MCP protocol support in Stepwise"
+
+variables:
+  mcp_server_url: "http://localhost:8080/mcp"
+  tool_name: "weather"
+  resource_uri: "file:///tmp/data.json"
+
+steps:
+  - name: "List MCP Tools"
+    description: "List all available tools from MCP server"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "tools/list"
+      timeout: "10s"
+    validate:
+      - json_path: "$.tools"
+        type: "array"
+    capture:
+      tool_count: "$.tools.length()"
+    show_response: true
+
+  - name: "Call MCP Tool"
+    description: "Call a specific tool with parameters"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "tools/call"
+      mcp_params:
+        name: "{{tool_name}}"
+        arguments:
+          location: "New York"
+          units: "celsius"
+      timeout: "10s"
+    validate:
+      - json_path: "$.content"
+        type: "array"
+    capture:
+      tool_result: "$.content[0].text"
+    show_response: true
+
+  - name: "List MCP Resources"
+    description: "List all available resources from MCP server"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "resources/list"
+      timeout: "10s"
+    validate:
+      - json_path: "$.resources"
+        type: "array"
+    show_response: true
+
+  - name: "Read MCP Resource"
+    description: "Read a specific resource"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "resources/read"
+      mcp_params:
+        uri: "{{resource_uri}}"
+      timeout: "10s"
+    validate:
+      - json_path: "$.contents"
+        type: "array"
+    capture:
+      resource_content: "$.contents[0].text"
+    show_response: true
+
+  - name: "List MCP Prompts"
+    description: "List all available prompts from MCP server"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "prompts/list"
+      timeout: "10s"
+    validate:
+      - json_path: "$.prompts"
+        type: "array"
+    show_response: true
+
+  - name: "Get MCP Prompt"
+    description: "Get a specific prompt with arguments"
+    request:
+      protocol: "mcp"
+      mcp_transport: "http"
+      mcp_url: "{{mcp_server_url}}"
+      mcp_method: "prompts/get"
+      mcp_params:
+        name: "code_review"
+        arguments:
+          code: "function test() { return true; }"
+          language: "javascript"
+      timeout: "10s"
+    validate:
+      - json_path: "$.messages"
+        type: "array"
+    show_response: true
+
+  - name: "MCP with Stdio Transport"
+    description: "Example using stdio transport (requires MCP server command)"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "npx"
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/path/to/directory"
+      mcp_method: "tools/list"
+      mcp_client_info:
+        name: "stepwise"
+        version: "1.0.0"
+      timeout: "30s"
+    validate:
+      - json_path: "$.tools"
+        type: "array"
+    show_response: true
+

@@ -16,6 +16,7 @@ import (
 	grpcclient "github.com/cjp2600/stepwise/internal/grpc"
 	httpclient "github.com/cjp2600/stepwise/internal/http"
 	"github.com/cjp2600/stepwise/internal/logger"
+	mcpclient "github.com/cjp2600/stepwise/internal/mcp"
 	"github.com/cjp2600/stepwise/internal/validation"
 	"github.com/cjp2600/stepwise/internal/variables"
 	"gopkg.in/yaml.v3"
@@ -88,9 +89,9 @@ type PollConfig struct {
 	Until       []validation.ValidationRule `yaml:"until" json:"until"`                           // Conditions that must be met to stop polling
 }
 
-// Request represents an HTTP, gRPC, or database request
+// Request represents an HTTP, gRPC, database, or MCP request
 type Request struct {
-	// Protocol type: "http", "grpc", or "db"
+	// Protocol type: "http", "grpc", "db", or "mcp"
 	Protocol string `yaml:"protocol" json:"protocol"`
 
 	// HTTP fields
@@ -111,6 +112,15 @@ type Request struct {
 
 	// Database fields
 	DBConfig *dbclient.Config `yaml:"db" json:"db"`
+
+	// MCP fields
+	MCPTransport  string                 `yaml:"mcp_transport" json:"mcp_transport"` // "stdio", "http", "websocket"
+	MCPCommand    string                 `yaml:"mcp_command" json:"mcp_command"`     // For stdio transport
+	MCPArgs       []string               `yaml:"mcp_args,omitempty" json:"mcp_args,omitempty"`
+	MCPURL        string                 `yaml:"mcp_url" json:"mcp_url"`       // For HTTP/WebSocket transport
+	MCPMethod     string                 `yaml:"mcp_method" json:"mcp_method"` // MCP method to call
+	MCPParams     map[string]interface{} `yaml:"mcp_params,omitempty" json:"mcp_params,omitempty"`
+	MCPClientInfo *mcpclient.ClientInfo  `yaml:"mcp_client_info,omitempty" json:"mcp_client_info,omitempty"`
 
 	// Common fields
 	Timeout string `yaml:"timeout" json:"timeout"`
@@ -157,6 +167,8 @@ type Executor struct {
 	httpClient       *httpclient.Client
 	grpcClient       *grpcclient.Client
 	grpcServerAddr   string // Track current gRPC server address to detect changes
+	mcpClient        *mcpclient.Client
+	mcpClientKey     string // Track current MCP client key to detect changes
 	dbClient         *dbclient.Client
 	validator        *validation.Validator
 	varManager       *variables.Manager
@@ -715,6 +727,7 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		// Execute request based on protocol
 		var httpResponse *httpclient.Response
 		var grpcResponse *grpcclient.Response
+		var mcpResponse *mcpclient.Response
 		var dbResponse *dbclient.Response
 		var requestErr error
 
@@ -813,6 +826,97 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			defer dbClient.Close()
 
 			dbResponse, requestErr = dbClient.Execute(query)
+		} else if substitutedReq.Protocol == "mcp" {
+			// Execute MCP request
+			if substitutedReq.MCPMethod == "" {
+				lastError = fmt.Errorf("mcp_method is required for mcp protocol")
+				continue
+			}
+
+			// Build MCP client key to track different MCP servers
+			mcpClientKey := ""
+			if substitutedReq.MCPTransport == "stdio" {
+				mcpClientKey = fmt.Sprintf("stdio:%s:%v", substitutedReq.MCPCommand, substitutedReq.MCPArgs)
+			} else if substitutedReq.MCPTransport == "http" || substitutedReq.MCPTransport == "https" {
+				mcpClientKey = fmt.Sprintf("http:%s", substitutedReq.MCPURL)
+			} else {
+				lastError = fmt.Errorf("unsupported mcp_transport: %s (supported: stdio, http, https)", substitutedReq.MCPTransport)
+				continue
+			}
+
+			// Initialize MCP client if not already done or if client key changed
+			if e.mcpClient == nil || e.mcpClientKey != mcpClientKey {
+				// Close old client if exists and client key changed
+				if e.mcpClient != nil && e.mcpClientKey != mcpClientKey {
+					e.mcpClient.Close()
+					e.logger.Debug("Closing MCP client for different server", "old_key", e.mcpClientKey, "new_key", mcpClientKey)
+				}
+
+				// Build MCP request for client creation
+				mcpReq := &mcpclient.Request{
+					Transport:  substitutedReq.MCPTransport,
+					Command:    substitutedReq.MCPCommand,
+					Args:       substitutedReq.MCPArgs,
+					URL:        substitutedReq.MCPURL,
+					Headers:    make(map[string]string),
+					ClientInfo: substitutedReq.MCPClientInfo,
+				}
+
+				// Substitute variables in MCP configuration
+				if mcpReq.Command != "" {
+					if subCmd, err := e.varManager.Substitute(mcpReq.Command); err == nil {
+						mcpReq.Command = subCmd
+					}
+				}
+				if mcpReq.URL != "" {
+					if subURL, err := e.varManager.Substitute(mcpReq.URL); err == nil {
+						mcpReq.URL = subURL
+					}
+				}
+
+				mcpClient, err := mcpclient.NewClient(mcpReq, e.logger)
+				if err != nil {
+					lastError = fmt.Errorf("failed to create MCP client: %w", err)
+					continue
+				}
+				e.mcpClient = mcpClient
+				e.mcpClientKey = mcpClientKey
+				e.logger.Debug("Created new MCP client", "key", mcpClientKey)
+			}
+
+			// Build MCP request for execution
+			mcpReq := &mcpclient.Request{
+				Transport: substitutedReq.MCPTransport,
+				Method:    substitutedReq.MCPMethod,
+				Params:    substitutedReq.MCPParams,
+				Timeout:   substitutedReq.Timeout,
+			}
+
+			// Substitute variables in MCP params
+			if mcpReq.Params != nil {
+				substitutedParams := make(map[string]interface{})
+				for key, value := range mcpReq.Params {
+					if strValue, ok := value.(string); ok {
+						if subValue, err := e.varManager.Substitute(strValue); err == nil {
+							substitutedParams[key] = subValue
+						} else {
+							substitutedParams[key] = strValue
+						}
+					} else if mapValue, ok := value.(map[string]interface{}); ok {
+						substitutedMap, err := e.varManager.SubstituteMap(mapValue)
+						if err == nil {
+							substitutedParams[key] = substitutedMap
+						} else {
+							substitutedParams[key] = mapValue
+						}
+					} else {
+						substitutedParams[key] = value
+					}
+				}
+				mcpReq.Params = substitutedParams
+			}
+
+			mcpResponse, requestErr = e.mcpClient.Execute(mcpReq)
 		} else {
 			// Execute HTTP request (default)
 			queryMap := make(map[string]string)
@@ -861,6 +965,26 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 					fmt.Printf("Error: %v\n", requestErr)
 					fmt.Println("================ END RESPONSE ================")
 				}
+			} else if substitutedReq.Protocol == "mcp" {
+				if mcpResponse != nil {
+					jsonData, err := json.MarshalIndent(mcpResponse.Result, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (MCP) ================")
+						fmt.Printf("Method: %s\n", mcpResponse.Method)
+						fmt.Printf("Duration: %v\n", mcpResponse.Duration)
+						if mcpResponse.Error != nil {
+							fmt.Printf("Error: Code %d - %s\n", mcpResponse.Error.Code, mcpResponse.Error.Message)
+						}
+						fmt.Println("Result:")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE (MCP) ================")
+					fmt.Printf("Error: %v\n", requestErr)
+					fmt.Println("================ END RESPONSE ================")
+				}
 			} else {
 				if httpResponse != nil {
 					fmt.Println("================ RESPONSE ================")
@@ -885,7 +1009,7 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			lastError = fmt.Errorf("request failed: %w", requestErr)
 			// Log API response on request error when verbose is enabled (if response exists)
 			if !e.logger.IsMuted() {
-				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, mcpResponse, dbResponse, step.Name)
 			}
 			continue
 		}
@@ -923,6 +1047,24 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 					}
 					validationResults, validationErr = e.validator.Validate(mockResponse, step.Validate)
 				}
+			} else if substitutedReq.Protocol == "mcp" {
+				// For MCP, create a mock HTTP response for validation
+				jsonData, err := json.Marshal(mcpResponse.Result)
+				if err != nil {
+					validationErr = fmt.Errorf("failed to marshal MCP response for validation: %w", err)
+				} else {
+					// Check for MCP error
+					statusCode := 200
+					if mcpResponse.Error != nil {
+						statusCode = mcpResponse.Error.Code
+					}
+					mockResponse := &httpclient.Response{
+						StatusCode: statusCode,
+						Body:       jsonData,
+						Duration:   mcpResponse.Duration,
+					}
+					validationResults, validationErr = e.validator.Validate(mockResponse, step.Validate)
+				}
 			} else {
 				validationResults, validationErr = e.validator.Validate(httpResponse, step.Validate)
 			}
@@ -945,7 +1087,7 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 			lastError = fmt.Errorf("validation failed: %s", strings.Join(validationErrors, "; "))
 			// Log API response on validation failure when verbose is enabled
 			if !e.logger.IsMuted() {
-				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, mcpResponse, dbResponse, step.Name)
 			}
 			continue
 		}
@@ -976,6 +1118,19 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 						StatusCode: 200,
 						Body:       jsonData,
 						Duration:   dbResponse.Duration,
+					}
+					captureErr = e.captureValues(mockResponse, step.Capture, result)
+				}
+			} else if substitutedReq.Protocol == "mcp" {
+				// For MCP, create a mock response for capture
+				jsonData, err := json.Marshal(mcpResponse.Result)
+				if err != nil {
+					captureErr = fmt.Errorf("failed to marshal MCP response: %w", err)
+				} else {
+					mockResponse := &httpclient.Response{
+						StatusCode: 200,
+						Body:       jsonData,
+						Duration:   mcpResponse.Duration,
 					}
 					captureErr = e.captureValues(mockResponse, step.Capture, result)
 				}
@@ -1017,6 +1172,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 	var lastError error
 	var lastHTTPResponse *httpclient.Response
 	var lastGRPCResponse *grpcclient.Response
+	var lastMCPResponse *mcpclient.Response
 	var lastDBResponse *dbclient.Response
 	var lastSubstitutedReq *Request
 
@@ -1044,6 +1200,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 		// Execute request based on protocol
 		var httpResponse *httpclient.Response
 		var grpcResponse *grpcclient.Response
+		var mcpResponse *mcpclient.Response
 		var dbResponse *dbclient.Response
 		var requestErr error
 
@@ -1157,6 +1314,109 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			if dbResponse != nil {
 				lastDBResponse = dbResponse
 			}
+		} else if substitutedReq.Protocol == "mcp" {
+			// Execute MCP request (same logic as in executeStep)
+			if substitutedReq.MCPMethod == "" {
+				lastError = fmt.Errorf("mcp_method is required for mcp protocol")
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+
+			// Build MCP client key to track different MCP servers
+			mcpClientKey := ""
+			if substitutedReq.MCPTransport == "stdio" {
+				mcpClientKey = fmt.Sprintf("stdio:%s:%v", substitutedReq.MCPCommand, substitutedReq.MCPArgs)
+			} else if substitutedReq.MCPTransport == "http" || substitutedReq.MCPTransport == "https" {
+				mcpClientKey = fmt.Sprintf("http:%s", substitutedReq.MCPURL)
+			} else {
+				lastError = fmt.Errorf("unsupported mcp_transport: %s (supported: stdio, http, https)", substitutedReq.MCPTransport)
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+
+			// Initialize MCP client if not already done or if client key changed
+			if e.mcpClient == nil || e.mcpClientKey != mcpClientKey {
+				// Close old client if exists and client key changed
+				if e.mcpClient != nil && e.mcpClientKey != mcpClientKey {
+					e.mcpClient.Close()
+					e.logger.Debug("Closing MCP client for different server (polling)", "old_key", e.mcpClientKey, "new_key", mcpClientKey)
+				}
+
+				// Build MCP request for client creation
+				mcpReq := &mcpclient.Request{
+					Transport:  substitutedReq.MCPTransport,
+					Command:    substitutedReq.MCPCommand,
+					Args:       substitutedReq.MCPArgs,
+					URL:        substitutedReq.MCPURL,
+					Headers:    make(map[string]string),
+					ClientInfo: substitutedReq.MCPClientInfo,
+				}
+
+				// Substitute variables in MCP configuration
+				if mcpReq.Command != "" {
+					if subCmd, err := e.varManager.Substitute(mcpReq.Command); err == nil {
+						mcpReq.Command = subCmd
+					}
+				}
+				if mcpReq.URL != "" {
+					if subURL, err := e.varManager.Substitute(mcpReq.URL); err == nil {
+						mcpReq.URL = subURL
+					}
+				}
+
+				mcpClient, err := mcpclient.NewClient(mcpReq, e.logger)
+				if err != nil {
+					lastError = fmt.Errorf("failed to create MCP client: %w", err)
+					if attempt < maxAttempts {
+						time.Sleep(interval)
+					}
+					continue
+				}
+				e.mcpClient = mcpClient
+				e.mcpClientKey = mcpClientKey
+				e.logger.Debug("Created new MCP client (polling)", "key", mcpClientKey)
+			}
+
+			// Build MCP request for execution
+			mcpReq := &mcpclient.Request{
+				Transport: substitutedReq.MCPTransport,
+				Method:    substitutedReq.MCPMethod,
+				Params:    substitutedReq.MCPParams,
+				Timeout:   substitutedReq.Timeout,
+			}
+
+			// Substitute variables in MCP params
+			if mcpReq.Params != nil {
+				substitutedParams := make(map[string]interface{})
+				for key, value := range mcpReq.Params {
+					if strValue, ok := value.(string); ok {
+						if subValue, err := e.varManager.Substitute(strValue); err == nil {
+							substitutedParams[key] = subValue
+						} else {
+							substitutedParams[key] = strValue
+						}
+					} else if mapValue, ok := value.(map[string]interface{}); ok {
+						substitutedMap, err := e.varManager.SubstituteMap(mapValue)
+						if err == nil {
+							substitutedParams[key] = substitutedMap
+						} else {
+							substitutedParams[key] = mapValue
+						}
+					} else {
+						substitutedParams[key] = value
+					}
+				}
+				mcpReq.Params = substitutedParams
+			}
+
+			mcpResponse, requestErr = e.mcpClient.Execute(mcpReq)
+			if mcpResponse != nil {
+				lastMCPResponse = mcpResponse
+			}
 		} else {
 			// Execute HTTP request (default)
 			queryMap := make(map[string]string)
@@ -1208,6 +1468,26 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 					fmt.Printf("Error: %v\n", requestErr)
 					fmt.Println("================ END RESPONSE ================")
 				}
+			} else if substitutedReq.Protocol == "mcp" {
+				if mcpResponse != nil {
+					jsonData, err := json.MarshalIndent(mcpResponse.Result, "", "  ")
+					if err == nil {
+						fmt.Println("================ RESPONSE (MCP) ================")
+						fmt.Printf("Method: %s\n", mcpResponse.Method)
+						fmt.Printf("Duration: %v\n", mcpResponse.Duration)
+						if mcpResponse.Error != nil {
+							fmt.Printf("Error: Code %d - %s\n", mcpResponse.Error.Code, mcpResponse.Error.Message)
+						}
+						fmt.Println("Result:")
+						fmt.Println(string(jsonData))
+						fmt.Println("================ END RESPONSE ================")
+					}
+				} else if requestErr != nil {
+					// Show error if response is nil but we have an error
+					fmt.Println("================ RESPONSE (MCP) ================")
+					fmt.Printf("Error: %v\n", requestErr)
+					fmt.Println("================ END RESPONSE ================")
+				}
 			} else {
 				if httpResponse != nil {
 					fmt.Println("================ RESPONSE ================")
@@ -1233,7 +1513,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			e.logger.Debug("Polling attempt failed", "step", step.Name, "attempt", attempt, "error", requestErr)
 			// Log API response on request error when verbose is enabled (if response exists)
 			if !e.logger.IsMuted() {
-				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, dbResponse, step.Name)
+				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, mcpResponse, dbResponse, step.Name)
 			}
 			if attempt < maxAttempts {
 				time.Sleep(interval)
@@ -1276,6 +1556,26 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 				Body:       jsonData,
 				Duration:   dbResponse.Duration,
 			}
+		} else if substitutedReq.Protocol == "mcp" {
+			// For MCP, create a mock HTTP response for validation
+			jsonData, err := json.Marshal(mcpResponse.Result)
+			if err != nil {
+				lastError = fmt.Errorf("failed to marshal MCP response for validation: %w", err)
+				if attempt < maxAttempts {
+					time.Sleep(interval)
+				}
+				continue
+			}
+			// Check for MCP error
+			statusCode := 200
+			if mcpResponse.Error != nil {
+				statusCode = mcpResponse.Error.Code
+			}
+			responseForValidation = &httpclient.Response{
+				StatusCode: statusCode,
+				Body:       jsonData,
+				Duration:   mcpResponse.Duration,
+			}
 		} else {
 			responseForValidation = httpResponse
 		}
@@ -1313,7 +1613,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			// Capture values if specified
 			if step.Capture != nil {
 				var captureErr error
-				if substitutedReq.Protocol == "grpc" || substitutedReq.Protocol == "db" {
+				if substitutedReq.Protocol == "grpc" || substitutedReq.Protocol == "db" || substitutedReq.Protocol == "mcp" {
 					captureErr = e.captureValues(responseForValidation, step.Capture, result)
 				} else {
 					captureErr = e.captureValues(httpResponse, step.Capture, result)
@@ -1345,7 +1645,7 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 
 	// Log API response on failure when verbose is enabled
 	if !e.logger.IsMuted() && lastSubstitutedReq != nil {
-		e.logAPIResponseOnFailure(lastSubstitutedReq.Protocol, lastHTTPResponse, lastGRPCResponse, lastDBResponse, step.Name)
+		e.logAPIResponseOnFailure(lastSubstitutedReq.Protocol, lastHTTPResponse, lastGRPCResponse, lastMCPResponse, lastDBResponse, step.Name)
 	}
 
 	if lastError != nil {
@@ -1587,20 +1887,27 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 	e.logger.Debug("Substituting variables in request", "original_url", req.URL)
 
 	substituted := &Request{
-		Protocol:   req.Protocol,
-		Method:     req.Method,
-		URL:        req.URL,
-		Headers:    make(map[string]string),
-		Body:       req.Body,
-		Query:      req.Query, // Can be string for DB or map for HTTP
-		Service:    req.Service,
-		GRPCMethod: req.GRPCMethod,
-		Data:       req.Data,
-		Metadata:   make(map[string]string),
-		ServerAddr: req.ServerAddr,
-		Insecure:   req.Insecure,
-		DBConfig:   req.DBConfig,
-		Timeout:    req.Timeout,
+		Protocol:      req.Protocol,
+		Method:        req.Method,
+		URL:           req.URL,
+		Headers:       make(map[string]string),
+		Body:          req.Body,
+		Query:         req.Query, // Can be string for DB or map for HTTP
+		Service:       req.Service,
+		GRPCMethod:    req.GRPCMethod,
+		Data:          req.Data,
+		Metadata:      make(map[string]string),
+		ServerAddr:    req.ServerAddr,
+		Insecure:      req.Insecure,
+		DBConfig:      req.DBConfig,
+		MCPTransport:  req.MCPTransport,
+		MCPCommand:    req.MCPCommand,
+		MCPArgs:       req.MCPArgs,
+		MCPURL:        req.MCPURL,
+		MCPMethod:     req.MCPMethod,
+		MCPParams:     req.MCPParams,
+		MCPClientInfo: req.MCPClientInfo,
+		Timeout:       req.Timeout,
 	}
 
 	// Substitute URL
@@ -1723,6 +2030,64 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 		}
 	}
 
+	// Substitute MCP fields
+	if req.MCPCommand != "" {
+		if substitutedMCPCommand, err := e.varManager.Substitute(req.MCPCommand); err != nil {
+			e.logger.Error("Failed to substitute mcp_command", "mcp_command", req.MCPCommand, "error", err)
+			return nil, fmt.Errorf("failed to substitute mcp_command: %w", err)
+		} else {
+			substituted.MCPCommand = substitutedMCPCommand
+			e.logger.Debug("MCPCommand substitution result", "original", req.MCPCommand, "substituted", substitutedMCPCommand)
+		}
+	}
+
+	if req.MCPURL != "" {
+		if substitutedMCPURL, err := e.varManager.Substitute(req.MCPURL); err != nil {
+			e.logger.Error("Failed to substitute mcp_url", "mcp_url", req.MCPURL, "error", err)
+			return nil, fmt.Errorf("failed to substitute mcp_url: %w", err)
+		} else {
+			substituted.MCPURL = substitutedMCPURL
+			e.logger.Debug("MCPURL substitution result", "original", req.MCPURL, "substituted", substitutedMCPURL)
+		}
+	}
+
+	if req.MCPMethod != "" {
+		if substitutedMCPMethod, err := e.varManager.Substitute(req.MCPMethod); err != nil {
+			e.logger.Error("Failed to substitute mcp_method", "mcp_method", req.MCPMethod, "error", err)
+			return nil, fmt.Errorf("failed to substitute mcp_method: %w", err)
+		} else {
+			substituted.MCPMethod = substitutedMCPMethod
+			e.logger.Debug("MCPMethod substitution result", "original", req.MCPMethod, "substituted", substitutedMCPMethod)
+		}
+	}
+
+	// Substitute MCP params
+	if req.MCPParams != nil {
+		substitutedParams := make(map[string]interface{})
+		for key, value := range req.MCPParams {
+			if strValue, ok := value.(string); ok {
+				if substitutedValue, err := e.varManager.Substitute(strValue); err != nil {
+					e.logger.Error("Failed to substitute mcp_param", "key", key, "value", strValue, "error", err)
+					return nil, fmt.Errorf("failed to substitute mcp_param %s: %w", key, err)
+				} else {
+					substitutedParams[key] = substitutedValue
+					e.logger.Debug("MCPParam substitution result", "key", key, "original", strValue, "substituted", substitutedValue)
+				}
+			} else if mapValue, ok := value.(map[string]interface{}); ok {
+				if substitutedMap, err := e.varManager.SubstituteMap(mapValue); err != nil {
+					e.logger.Error("Failed to substitute mcp_param map", "key", key, "error", err)
+					return nil, fmt.Errorf("failed to substitute mcp_param %s: %w", key, err)
+				} else {
+					substitutedParams[key] = substitutedMap
+					e.logger.Debug("MCPParam map substitution result", "key", key, "original", mapValue, "substituted", substitutedMap)
+				}
+			} else {
+				substitutedParams[key] = value
+			}
+		}
+		substituted.MCPParams = substitutedParams
+	}
+
 	// Substitute timeout if it contains variables
 	if req.Timeout != "" {
 		if substitutedTimeout, err := e.varManager.Substitute(req.Timeout); err != nil {
@@ -1734,7 +2099,7 @@ func (e *Executor) substituteRequestVariables(req *Request) (*Request, error) {
 		}
 	}
 
-	e.logger.Debug("Final substituted request", "url", substituted.URL, "method", substituted.Method, "timeout", substituted.Timeout)
+	e.logger.Debug("Final substituted request", "url", substituted.URL, "method", substituted.Method, "timeout", substituted.Timeout, "mcp_method", substituted.MCPMethod)
 	return substituted, nil
 }
 
@@ -1762,7 +2127,7 @@ func (e *Executor) captureValues(response *httpclient.Response, captures map[str
 }
 
 // logAPIResponseOnFailure logs the API response when a step fails and verbose mode is enabled
-func (e *Executor) logAPIResponseOnFailure(protocol string, httpResponse *httpclient.Response, grpcResponse *grpcclient.Response, dbResponse *dbclient.Response, stepName string) {
+func (e *Executor) logAPIResponseOnFailure(protocol string, httpResponse *httpclient.Response, grpcResponse *grpcclient.Response, mcpResponse *mcpclient.Response, dbResponse *dbclient.Response, stepName string) {
 	if protocol == "grpc" {
 		if grpcResponse != nil {
 			jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
@@ -1786,6 +2151,22 @@ func (e *Executor) logAPIResponseOnFailure(protocol string, httpResponse *httpcl
 					"response", string(jsonData))
 			} else {
 				e.logger.Error("API Response (DB) on failure - failed to marshal",
+					"step", stepName,
+					"error", err)
+			}
+		}
+	} else if protocol == "mcp" {
+		if mcpResponse != nil {
+			jsonData, err := json.MarshalIndent(mcpResponse.Result, "", "  ")
+			if err == nil {
+				e.logger.Error("API Response (MCP) on failure",
+					"step", stepName,
+					"method", mcpResponse.Method,
+					"duration", mcpResponse.Duration,
+					"error", mcpResponse.Error,
+					"response", string(jsonData))
+			} else {
+				e.logger.Error("API Response (MCP) on failure - failed to marshal",
 					"step", stepName,
 					"error", err)
 			}
