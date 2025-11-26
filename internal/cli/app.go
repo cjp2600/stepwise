@@ -14,15 +14,18 @@ import (
 	"github.com/cjp2600/stepwise/internal/ai"
 	"github.com/cjp2600/stepwise/internal/config"
 	"github.com/cjp2600/stepwise/internal/logger"
+	"github.com/cjp2600/stepwise/internal/mcp"
 	"github.com/cjp2600/stepwise/internal/report"
 	"github.com/cjp2600/stepwise/internal/workflow"
 )
 
 // App represents the CLI application
 type App struct {
-	config *config.Config
-	logger *logger.Logger
-	colors *Colors
+	config        *config.Config
+	logger        *logger.Logger
+	colors        *Colors
+	mcpOutput     mcp.MCPOutputHandler
+	mcpMode       bool
 }
 
 // NewApp creates a new CLI application
@@ -64,6 +67,51 @@ func (a *App) Run(args []string) error {
 
 	if command == "" {
 		return a.showHelp()
+	}
+
+	switch command {
+	case "init":
+		return a.handleInit(commandArgs)
+	case "run":
+		return a.handleRun(commandArgs)
+	case "validate":
+		return a.handleValidate(commandArgs)
+	case "info":
+		return a.handleInfo(commandArgs)
+	case "generate":
+		return a.handleGenerate(commandArgs)
+	case "codex":
+		return a.handleCodex(commandArgs)
+	case "help":
+		return a.showHelp()
+	case "version":
+		return a.showVersion()
+	default:
+		return fmt.Errorf("unknown command: %s", command)
+	}
+}
+
+// RunWithMCP executes the CLI application with MCP output handler
+func (a *App) RunWithMCP(args []string, outputHandler mcp.MCPOutputHandler) error {
+	a.mcpOutput = outputHandler
+	a.mcpMode = true
+	a.logger.SetMuteMode(true)
+
+	if len(args) < 1 {
+		return a.showHelp()
+	}
+
+	// In MCP mode, args already contain the command as first element
+	// e.g., ["run", "path/to/file.yml"] or ["validate", "path/to/file.yml"]
+	command := args[0]
+	commandArgs := args[1:]
+
+	// Global help/version
+	if command == "--help" || command == "-h" {
+		return a.showHelp()
+	}
+	if command == "--version" || command == "-v" {
+		return a.showVersion()
 	}
 
 	switch command {
@@ -193,6 +241,11 @@ func (a *App) handleRun(args []string) error {
 
 		// Set fail-fast mode
 		executor.SetFailFast(*failFast)
+		
+		// Set MCP mode if enabled
+		if a.mcpMode {
+			executor.SetMCPMode(true)
+		}
 
 		// Setup live progress reporter if not in verbose mode
 		var progressReporter *LiveProgressReporter
@@ -222,9 +275,42 @@ func (a *App) handleRun(args []string) error {
 					if err != nil {
 						update.Error = err.Error()
 					}
+					
+					// Send to MCP if in MCP mode
+					if a.mcpMode && a.mcpOutput != nil {
+						mcpUpdate := mcp.ProgressUpdate{
+							StepName:          update.StepName,
+							StepIndex:         update.StepIndex,
+							TotalSteps:        update.TotalSteps,
+							Status:            update.Status,
+							Duration:          update.Duration,
+							Error:             update.Error,
+							ValidationCount:   update.ValidationCount,
+							ValidationsPassed: update.ValidationsPassed,
+						}
+						a.mcpOutput.SendProgress(mcpUpdate)
+					}
+					
 					progressReporter.Update(update)
 				})
 			}
+		} else if a.mcpMode && a.mcpOutput != nil {
+			// In verbose mode with MCP, still send progress updates
+			executor.SetProgressCallback(func(stepName string, stepIndex int, totalSteps int, status string, duration time.Duration, validationsPassed int, validationsTotal int, err error) {
+				update := mcp.ProgressUpdate{
+					StepName:          stepName,
+					StepIndex:         stepIndex,
+					TotalSteps:        totalSteps,
+					Status:            status,
+					Duration:          duration,
+					ValidationCount:   validationsTotal,
+					ValidationsPassed: validationsPassed,
+				}
+				if err != nil {
+					update.Error = err.Error()
+				}
+				a.mcpOutput.SendProgress(update)
+			})
 		}
 
 		results, err := executor.Execute(wf)
@@ -243,6 +329,11 @@ func (a *App) handleRun(args []string) error {
 
 		// Workflow completion is now shown by progress reporter
 		hasFailures := a.printResults(results)
+		
+		// Send results to MCP if in MCP mode
+		if a.mcpMode && a.mcpOutput != nil {
+			a.mcpOutput.SendResult(results)
+		}
 
 		// Generate HTML report if requested
 		if *htmlReportEnabled {
@@ -254,13 +345,21 @@ func (a *App) handleRun(args []string) error {
 			}
 
 			if err := a.generateHTMLReport(results, workflowName, path, reportPath); err != nil {
-				fmt.Printf("%s %s: %v\n", a.colors.Yellow("[WARNING]"), a.colors.Yellow("Failed to generate HTML report"), err)
+				if a.mcpMode && a.mcpOutput != nil {
+					a.mcpOutput.SendLog("warning", "Failed to generate HTML report", map[string]interface{}{"error": err.Error()})
+				} else {
+					fmt.Printf("%s %s: %v\n", a.colors.Yellow("[WARNING]"), a.colors.Yellow("Failed to generate HTML report"), err)
+				}
 			} else {
 				if reportPath == "" {
 					timestamp := time.Now().Format("20060102_150405")
 					reportPath = fmt.Sprintf("test-report_%s.html", timestamp)
 				}
-				fmt.Printf("%s %s\n", a.colors.Green("[INFO]"), a.colors.Green(fmt.Sprintf("HTML report generated: %s", reportPath)))
+				if a.mcpMode && a.mcpOutput != nil {
+					a.mcpOutput.SendLog("info", "HTML report generated", map[string]interface{}{"path": reportPath})
+				} else {
+					fmt.Printf("%s %s\n", a.colors.Green("[INFO]"), a.colors.Green(fmt.Sprintf("HTML report generated: %s", reportPath)))
+				}
 			}
 		}
 
@@ -279,13 +378,23 @@ func (a *App) handleValidate(args []string) error {
 
 	workflowFile := args[0]
 	a.logger.Info("Validating workflow", "file", workflowFile)
+	
+	if a.mcpMode && a.mcpOutput != nil {
+		a.mcpOutput.SendLog("info", "Validating workflow", map[string]interface{}{"file": workflowFile})
+	}
 
 	_, err := workflow.Load(workflowFile)
 	if err != nil {
+		if a.mcpMode && a.mcpOutput != nil {
+			a.mcpOutput.SendLog("error", "Workflow validation failed", map[string]interface{}{"error": err.Error()})
+		}
 		return fmt.Errorf("workflow validation failed: %w", err)
 	}
 
 	a.logger.Info("Workflow is valid")
+	if a.mcpMode && a.mcpOutput != nil {
+		a.mcpOutput.SendLog("info", "Workflow is valid", nil)
+	}
 	return nil
 }
 
@@ -297,13 +406,33 @@ func (a *App) handleInfo(args []string) error {
 
 	workflowFile := args[0]
 	a.logger.Info("Getting workflow info", "file", workflowFile)
+	
+	if a.mcpMode && a.mcpOutput != nil {
+		a.mcpOutput.SendLog("info", "Getting workflow info", map[string]interface{}{"file": workflowFile})
+	}
 
 	wf, err := workflow.Load(workflowFile)
 	if err != nil {
+		if a.mcpMode && a.mcpOutput != nil {
+			a.mcpOutput.SendLog("error", "Failed to load workflow", map[string]interface{}{"error": err.Error()})
+		}
 		return fmt.Errorf("failed to load workflow: %w", err)
 	}
 
 	a.printWorkflowInfo(wf)
+	
+	if a.mcpMode && a.mcpOutput != nil {
+		// Send workflow info as result
+		info := map[string]interface{}{
+			"name":        wf.Name,
+			"version":     wf.Version,
+			"description": wf.Description,
+			"steps":       len(wf.Steps),
+			"variables":   wf.Variables,
+		}
+		a.mcpOutput.SendResult(info)
+	}
+	
 	return nil
 }
 
@@ -434,8 +563,10 @@ func (a *App) showVersion() error {
 
 // printResults prints test results and returns true if there were failures
 func (a *App) printResults(results []workflow.TestResult) bool {
-	fmt.Println("\n" + a.colors.Bold("Test Results:"))
-	fmt.Println(a.colors.Dim("============="))
+	if !a.mcpMode {
+		fmt.Println("\n" + a.colors.Bold("Test Results:"))
+		fmt.Println(a.colors.Dim("============="))
+	}
 
 	passed := 0
 	failed := 0
@@ -445,27 +576,29 @@ func (a *App) printResults(results []workflow.TestResult) bool {
 		duration := int(result.Duration.Milliseconds())
 		totalDuration += duration
 
-		if result.Status == "passed" {
-			fmt.Printf("%s %s (%dms)\n",
-				a.colors.Green("✓"),
-				a.colors.Cyan(a.colors.Bold(result.Name)),
-				duration)
-			if result.PrintText != "" {
-				fmt.Printf("  %s\n", a.colors.Dim(result.PrintText))
-			}
-		} else {
-			fmt.Printf("%s %s (%dms) - %s\n",
-				a.colors.Red("✗"),
-				a.colors.Cyan(a.colors.Bold(result.Name)),
-				duration,
-				a.colors.Red(result.Error))
-			if result.PrintText != "" {
-				fmt.Printf("  %s\n", a.colors.Dim(result.PrintText))
+		if !a.mcpMode {
+			if result.Status == "passed" {
+				fmt.Printf("%s %s (%dms)\n",
+					a.colors.Green("✓"),
+					a.colors.Cyan(a.colors.Bold(result.Name)),
+					duration)
+				if result.PrintText != "" {
+					fmt.Printf("  %s\n", a.colors.Dim(result.PrintText))
+				}
+			} else {
+				fmt.Printf("%s %s (%dms) - %s\n",
+					a.colors.Red("✗"),
+					a.colors.Cyan(a.colors.Bold(result.Name)),
+					duration,
+					a.colors.Red(result.Error))
+				if result.PrintText != "" {
+					fmt.Printf("  %s\n", a.colors.Dim(result.PrintText))
+				}
 			}
 		}
 
 		// Print validations for this step
-		if len(result.Validations) > 0 {
+		if !a.mcpMode && len(result.Validations) > 0 {
 			fmt.Println("  Validations:")
 			for _, v := range result.Validations {
 				icon := a.colors.Green("✓")
@@ -518,26 +651,30 @@ func (a *App) printResults(results []workflow.TestResult) bool {
 		}
 	}
 
-	fmt.Printf("\n%s\n", a.colors.Bold("Summary:"))
-	fmt.Printf("- Total: %d tests\n", len(results))
-	fmt.Printf("- Passed: %s\n", a.colors.Green(fmt.Sprintf("%d", passed)))
-	fmt.Printf("- Failed: %s\n", a.colors.Red(fmt.Sprintf("%d", failed)))
-	fmt.Printf("- Duration: %dms\n", totalDuration)
+	if !a.mcpMode {
+		fmt.Printf("\n%s\n", a.colors.Bold("Summary:"))
+		fmt.Printf("- Total: %d tests\n", len(results))
+		fmt.Printf("- Passed: %s\n", a.colors.Green(fmt.Sprintf("%d", passed)))
+		fmt.Printf("- Failed: %s\n", a.colors.Red(fmt.Sprintf("%d", failed)))
+		fmt.Printf("- Duration: %dms\n", totalDuration)
+	}
 
 	return failed > 0
 }
 
 // printWorkflowInfo prints workflow information
 func (a *App) printWorkflowInfo(wf *workflow.Workflow) {
-	fmt.Printf("Workflow: %s\n", wf.Name)
-	fmt.Printf("Version: %s\n", wf.Version)
-	fmt.Printf("Description: %s\n", wf.Description)
-	fmt.Printf("Steps: %d\n", len(wf.Steps))
+	if !a.mcpMode {
+		fmt.Printf("Workflow: %s\n", wf.Name)
+		fmt.Printf("Version: %s\n", wf.Version)
+		fmt.Printf("Description: %s\n", wf.Description)
+		fmt.Printf("Steps: %d\n", len(wf.Steps))
 
-	if len(wf.Variables) > 0 {
-		fmt.Printf("Variables: %d\n", len(wf.Variables))
-		for key, value := range wf.Variables {
-			fmt.Printf("  %s: %v\n", key, value)
+		if len(wf.Variables) > 0 {
+			fmt.Printf("Variables: %d\n", len(wf.Variables))
+			for key, value := range wf.Variables {
+				fmt.Printf("  %s: %v\n", key, value)
+			}
 		}
 	}
 }

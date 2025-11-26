@@ -22,6 +22,7 @@ Stepwise is an open-source API testing framework written in Go, inspired by [Ste
 - **CI/CD Integration**: Works with GitHub Actions, GitLab CI, and more
 - **Colorful Output**: Colored terminal output with CI/CD compatibility
 - **Verbose Logging**: Detailed debug information with `--verbose` flag
+- **MCP Server Mode**: Run as MCP (Model Context Protocol) server via stdin/stdout for integration with AI tools
 
 ## Quick Start
 
@@ -235,6 +236,9 @@ stepwise run workflow.yml --html-report --html-report-path my-report.html
 
 # Disable colors for CI
 NO_COLOR=1 stepwise run workflow.yml
+
+# Run as MCP server (for AI tool integration)
+stepwise --mcp-server
 ```
 
 ## Component System
@@ -451,6 +455,55 @@ data:
     file: "products.json"
 ```
 
+## MCP Server Mode
+
+Stepwise can run as an MCP (Model Context Protocol) server, enabling integration with AI tools and other MCP-compatible clients. In MCP mode, all output is sent via JSON-RPC notifications in real-time.
+
+### Running as MCP Server
+
+```bash
+# Start MCP server (reads from stdin, writes to stdout)
+stepwise --mcp-server
+```
+
+### MCP Tools
+
+The MCP server provides the following tools:
+
+- **stepwise_run**: Run a workflow file or directory
+  - Parameters: `path`, `parallel`, `recursive`, `verbose`, `fail_fast`, `html_report`, `html_report_path`
+- **stepwise_validate**: Validate a workflow file
+  - Parameters: `path`
+- **stepwise_info**: Show workflow information
+  - Parameters: `path`
+
+### MCP Notifications
+
+In MCP mode, the server sends real-time notifications:
+
+- `stepwise/progress`: Progress updates for workflow execution
+- `stepwise/log`: Log messages (info, warning, error)
+- `stepwise/result`: Test results and workflow information
+- `stepwise/output`: General output messages
+
+### Example MCP Client Usage
+
+```json
+// Initialize
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}
+
+// Send initialized notification
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+
+// List available tools
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+
+// Run a workflow
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"stepwise_run","arguments":{"path":"examples/simple-test.yml"}}}
+```
+
+See [MCP Documentation](docs/MCP.md) for complete details.
+
 ## Examples
 
 See the `examples/` directory for complete workflow examples:
@@ -614,6 +667,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **[Component System](docs/COMPONENTS.md)** - Reusable components and templates
 - **[Import System](docs/IMPORTS.md)** - Advanced import functionality
 - **[Array Filters](docs/ARRAY_FILTERS.md)** - Advanced JSONPath array filtering
+- **[MCP Protocol](docs/MCP.md)** - MCP server mode and integration
 - **[API Reference](docs/API.md)** - Complete API documentation
 
 ## Support

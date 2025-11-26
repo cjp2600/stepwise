@@ -186,6 +186,7 @@ type Executor struct {
 	varManager       *variables.Manager
 	progressCallback ProgressCallback
 	failFast         bool
+	mcpMode          bool                    // MCP mode - disables verbose and show_response
 	componentMap     map[string]StepWithVars // Component map for use steps
 }
 
@@ -197,6 +198,11 @@ func (e *Executor) SetProgressCallback(callback ProgressCallback) {
 // SetFailFast sets the fail-fast mode
 func (e *Executor) SetFailFast(failFast bool) {
 	e.failFast = failFast
+}
+
+// SetMCPMode sets the MCP mode (disables verbose and show_response)
+func (e *Executor) SetMCPMode(mcpMode bool) {
+	e.mcpMode = mcpMode
 }
 
 // NewExecutor creates a new workflow executor
@@ -1139,7 +1145,8 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		}
 
 		// Show response if requested (always show, even on errors)
-		if step.ShowResponse {
+		// Skip in MCP mode - responses should be sent via MCP notifications
+		if step.ShowResponse && !e.mcpMode {
 			if substitutedReq.Protocol == "grpc" {
 				if grpcResponse != nil {
 					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
@@ -1211,7 +1218,8 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		if requestErr != nil {
 			lastError = fmt.Errorf("request failed: %w", requestErr)
 			// Log API response on request error when verbose is enabled (if response exists)
-			if !e.logger.IsMuted() {
+			// Skip in MCP mode - verbose logging should be sent via MCP notifications
+			if !e.logger.IsMuted() && !e.mcpMode {
 				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, mcpResponse, dbResponse, step.Name)
 			}
 			continue
@@ -1289,7 +1297,8 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		if len(validationErrors) > 0 {
 			lastError = fmt.Errorf("validation failed: %s", strings.Join(validationErrors, "; "))
 			// Log API response on validation failure when verbose is enabled
-			if !e.logger.IsMuted() {
+			// Skip in MCP mode - verbose logging should be sent via MCP notifications
+			if !e.logger.IsMuted() && !e.mcpMode {
 				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, mcpResponse, dbResponse, step.Name)
 			}
 			continue
@@ -1647,7 +1656,8 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 		}
 
 		// Show response if requested (always show, even on errors)
-		if step.ShowResponse {
+		// Skip in MCP mode - responses should be sent via MCP notifications
+		if step.ShowResponse && !e.mcpMode {
 			if substitutedReq.Protocol == "grpc" {
 				if grpcResponse != nil {
 					jsonData, err := json.MarshalIndent(grpcResponse.Data, "", "  ")
@@ -1720,7 +1730,8 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			lastError = fmt.Errorf("request failed: %w", requestErr)
 			e.logger.Debug("Polling attempt failed", "step", step.Name, "attempt", attempt, "error", requestErr)
 			// Log API response on request error when verbose is enabled (if response exists)
-			if !e.logger.IsMuted() {
+			// Skip in MCP mode - verbose logging should be sent via MCP notifications
+			if !e.logger.IsMuted() && !e.mcpMode {
 				e.logAPIResponseOnFailure(substitutedReq.Protocol, httpResponse, grpcResponse, mcpResponse, dbResponse, step.Name)
 			}
 			if attempt < maxAttempts {
@@ -1852,7 +1863,8 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 	result.Duration = time.Since(startTime)
 
 	// Log API response on failure when verbose is enabled
-	if !e.logger.IsMuted() && lastSubstitutedReq != nil {
+	// Skip in MCP mode - verbose logging should be sent via MCP notifications
+	if !e.logger.IsMuted() && !e.mcpMode && lastSubstitutedReq != nil {
 		e.logAPIResponseOnFailure(lastSubstitutedReq.Protocol, lastHTTPResponse, lastGRPCResponse, lastMCPResponse, lastDBResponse, step.Name)
 	}
 

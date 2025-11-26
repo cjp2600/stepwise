@@ -113,6 +113,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 
 			executor := workflow.NewExecutor(r.config, r.logger)
 			executor.SetFailFast(r.failFast)
+			// Note: MCP mode is not set in runner - it's only for direct CLI execution
 
 			// Setup live progress reporter if not in verbose mode
 			var progressReporter *LiveProgressReporter
@@ -261,6 +262,7 @@ func (r *WorkflowRunner) RunWorkflows(path string, parallelism int, recursive bo
 
 					executor := workflow.NewExecutor(r.config, workflowLogger)
 					executor.SetFailFast(r.failFast)
+					// Note: MCP mode is not set in runner - it's only for direct CLI execution
 					res, err := executor.Execute(wf)
 					resultsCh <- wfResult{file: file, workflowName: wf.Name, results: res, err: err}
 
