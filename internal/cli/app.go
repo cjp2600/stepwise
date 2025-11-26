@@ -21,11 +21,11 @@ import (
 
 // App represents the CLI application
 type App struct {
-	config        *config.Config
-	logger        *logger.Logger
-	colors        *Colors
-	mcpOutput     mcp.MCPOutputHandler
-	mcpMode       bool
+	config    *config.Config
+	logger    *logger.Logger
+	colors    *Colors
+	mcpOutput mcp.MCPOutputHandler
+	mcpMode   bool
 }
 
 // NewApp creates a new CLI application
@@ -191,13 +191,23 @@ func (a *App) handleRun(args []string) error {
 		}
 	}
 	if path == "" {
-		fmt.Printf("%s %s\n", a.colors.Red("[ERROR]"), a.colors.Red("workflow file path or directory is required"))
+		if a.mcpMode {
+			// In MCP mode, output errors to stderr
+			fmt.Fprintf(os.Stderr, "%s %s\n", a.colors.Red("[ERROR]"), a.colors.Red("workflow file path or directory is required"))
+		} else {
+			fmt.Printf("%s %s\n", a.colors.Red("[ERROR]"), a.colors.Red("workflow file path or directory is required"))
+		}
 		os.Exit(1)
 	}
 
 	info, err := os.Stat(path)
 	if err != nil {
-		fmt.Printf("%s %s: %v\n", a.colors.Red("[ERROR]"), a.colors.Red("Failed to access path"), err)
+		if a.mcpMode {
+			// In MCP mode, output errors to stderr
+			fmt.Fprintf(os.Stderr, "%s %s: %v\n", a.colors.Red("[ERROR]"), a.colors.Red("Failed to access path"), err)
+		} else {
+			fmt.Printf("%s %s: %v\n", a.colors.Red("[ERROR]"), a.colors.Red("Failed to access path"), err)
+		}
 		os.Exit(1)
 	}
 
@@ -223,16 +233,20 @@ func (a *App) handleRun(args []string) error {
 	} else {
 		spinner := NewSpinner(a.colors, "Loading workflow...")
 
-		// Only use spinner in non-verbose mode
-		if !*verbose {
+		// Only use spinner in non-verbose mode and not in MCP mode
+		// In MCP mode, we don't output anything to stdout except JSON-RPC
+		if !*verbose && !a.mcpMode {
 			spinner.Start()
 		}
 
 		a.logger.Info("Running workflow", "file", path)
 		wf, err := workflow.Load(path)
 		if err != nil {
-			if !*verbose {
+			if !*verbose && !a.mcpMode {
 				spinner.Error("Failed to load workflow")
+			} else if a.mcpMode {
+				// In MCP mode, output errors to stderr
+				fmt.Fprintf(os.Stderr, "✗ Failed to load workflow: %v\n", err)
 			}
 			return fmt.Errorf("failed to load workflow: %w", err)
 		}
@@ -241,15 +255,16 @@ func (a *App) handleRun(args []string) error {
 
 		// Set fail-fast mode
 		executor.SetFailFast(*failFast)
-		
+
 		// Set MCP mode if enabled
 		if a.mcpMode {
 			executor.SetMCPMode(true)
 		}
 
-		// Setup live progress reporter if not in verbose mode
+		// Setup live progress reporter if not in verbose mode and not in MCP mode
+		// In MCP mode, we don't create LiveProgressReporter to avoid stdout pollution
 		var progressReporter *LiveProgressReporter
-		if !*verbose {
+		if !*verbose && !a.mcpMode {
 			spinner.Stop()
 			if len(wf.Steps) > 0 {
 				progressReporter = NewLiveProgressReporter(a.colors, len(wf.Steps))
@@ -275,22 +290,7 @@ func (a *App) handleRun(args []string) error {
 					if err != nil {
 						update.Error = err.Error()
 					}
-					
-					// Send to MCP if in MCP mode
-					if a.mcpMode && a.mcpOutput != nil {
-						mcpUpdate := mcp.ProgressUpdate{
-							StepName:          update.StepName,
-							StepIndex:         update.StepIndex,
-							TotalSteps:        update.TotalSteps,
-							Status:            update.Status,
-							Duration:          update.Duration,
-							Error:             update.Error,
-							ValidationCount:   update.ValidationCount,
-							ValidationsPassed: update.ValidationsPassed,
-						}
-						a.mcpOutput.SendProgress(mcpUpdate)
-					}
-					
+
 					progressReporter.Update(update)
 				})
 			}
@@ -321,15 +321,18 @@ func (a *App) handleRun(args []string) error {
 		}
 
 		if err != nil {
-			if !*verbose {
+			if !*verbose && !a.mcpMode {
 				fmt.Printf("✗ Workflow execution failed: %v\n", err)
+			} else if a.mcpMode {
+				// In MCP mode, output errors to stderr
+				fmt.Fprintf(os.Stderr, "✗ Workflow execution failed: %v\n", err)
 			}
 			return fmt.Errorf("workflow execution failed: %w", err)
 		}
 
 		// Workflow completion is now shown by progress reporter
 		hasFailures := a.printResults(results)
-		
+
 		// Send results to MCP if in MCP mode
 		if a.mcpMode && a.mcpOutput != nil {
 			a.mcpOutput.SendResult(results)
@@ -378,7 +381,7 @@ func (a *App) handleValidate(args []string) error {
 
 	workflowFile := args[0]
 	a.logger.Info("Validating workflow", "file", workflowFile)
-	
+
 	if a.mcpMode && a.mcpOutput != nil {
 		a.mcpOutput.SendLog("info", "Validating workflow", map[string]interface{}{"file": workflowFile})
 	}
@@ -406,7 +409,7 @@ func (a *App) handleInfo(args []string) error {
 
 	workflowFile := args[0]
 	a.logger.Info("Getting workflow info", "file", workflowFile)
-	
+
 	if a.mcpMode && a.mcpOutput != nil {
 		a.mcpOutput.SendLog("info", "Getting workflow info", map[string]interface{}{"file": workflowFile})
 	}
@@ -420,7 +423,7 @@ func (a *App) handleInfo(args []string) error {
 	}
 
 	a.printWorkflowInfo(wf)
-	
+
 	if a.mcpMode && a.mcpOutput != nil {
 		// Send workflow info as result
 		info := map[string]interface{}{
@@ -432,7 +435,7 @@ func (a *App) handleInfo(args []string) error {
 		}
 		a.mcpOutput.SendResult(info)
 	}
-	
+
 	return nil
 }
 
@@ -615,8 +618,8 @@ func (a *App) printResults(results []workflow.TestResult) bool {
 			}
 		}
 
-		// Print repeat results if any
-		if result.RepeatCount > 0 && len(result.RepeatResults) > 0 {
+		// Print repeat results if any (not in MCP mode)
+		if result.RepeatCount > 0 && len(result.RepeatResults) > 0 && !a.mcpMode {
 			for i, repeatResult := range result.RepeatResults {
 				icon := a.colors.Green("✓")
 				if repeatResult.Status != "passed" {
