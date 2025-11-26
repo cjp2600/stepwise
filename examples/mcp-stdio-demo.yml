@@ -1,0 +1,145 @@
+name: "MCP Stdio Transport Demo"
+version: "1.0"
+description: "Demonstrates MCP protocol using stdio transport (local process)"
+
+variables:
+  # Для stdio транспорта не нужен URL, сервер запускается как локальный процесс
+  # Пример с использованием npx для запуска MCP сервера из npm
+
+steps:
+  - name: "Initialize MCP Server via Stdio"
+    description: "Initialize MCP connection using stdio transport (local process)"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      # Команда для запуска MCP сервера
+      mcp_command: "npx"
+      # Аргументы команды - путь к MCP серверу и его параметры
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      mcp_method: "initialize"
+      timeout: "30s"
+    validate:
+      - json: "$.serverInfo.name"
+        type: "string"
+    show_response: true
+
+  - name: "List Tools from Stdio MCP Server"
+    description: "Get list of tools from MCP server running via stdio"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "npx"
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      mcp_method: "tools/list"
+      timeout: "30s"
+    validate:
+      - json: "$.tools"
+        type: "array"
+    show_response: true
+
+  - name: "List Resources from Stdio MCP Server"
+    description: "Get list of resources from MCP server"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "npx"
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      mcp_method: "resources/list"
+      timeout: "30s"
+    validate:
+      - json: "$.resources"
+        type: "array"
+    show_response: true
+
+  - name: "Read File Resource via Stdio"
+    description: "Read a file resource using stdio transport"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "npx"
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      mcp_method: "resources/read"
+      mcp_params:
+        uri: "file:///tmp/test.txt"
+      timeout: "30s"
+    validate:
+      - json: "$.contents"
+        type: "array"
+    show_response: true
+
+  - name: "Call Tool via Stdio"
+    description: "Call a tool from MCP server running via stdio"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "npx"
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      mcp_method: "tools/call"
+      mcp_params:
+        name: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+      timeout: "30s"
+    validate:
+      - json: "$.content"
+        type: "array"
+    show_response: true
+
+  # Пример с использованием Python MCP сервера
+  - name: "Python MCP Server via Stdio"
+    description: "Example with Python-based MCP server"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "python"
+      mcp_args:
+        - "-m"
+        - "mcp_server"
+        - "--config"
+        - "/path/to/config.json"
+      mcp_method: "tools/list"
+      timeout: "30s"
+    show_response: true
+
+  # Пример с использованием Go MCP сервера
+  - name: "Go MCP Server via Stdio"
+    description: "Example with Go-based MCP server binary"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "./mcp-server"
+      mcp_args:
+        - "--port"
+        - "8080"
+        - "--config"
+        - "config.yaml"
+      mcp_method: "initialize"
+      timeout: "30s"
+    show_response: true
+
+  # Пример с использованием нашего тестового сервера через stdio (если он поддерживает stdio)
+  # Примечание: наш тестовый сервер работает только через HTTP, но это пример структуры
+  - name: "Custom MCP Server via Stdio"
+    description: "Example with custom MCP server executable"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "/usr/local/bin/my-mcp-server"
+      mcp_args:
+        - "--verbose"
+        - "--log-level"
+        - "debug"
+      mcp_method: "tools/list"
+      timeout: "30s"
+    show_response: true
+

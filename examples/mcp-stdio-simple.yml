@@ -1,0 +1,53 @@
+name: "Simple MCP Stdio Example"
+version: "1.0"
+description: "Simple example of MCP stdio transport usage"
+
+steps:
+  - name: "Connect to MCP Server via Stdio"
+    description: "Initialize connection to MCP server running as local process"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      # Команда для запуска MCP сервера
+      # Например, npm пакет @modelcontextprotocol/server-filesystem
+      mcp_command: "npx"
+      # Аргументы: пакет и его параметры
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"  # Директория для работы с файлами
+      mcp_method: "initialize"
+      timeout: "30s"
+    show_response: true
+
+  - name: "List Available Tools"
+    description: "Get list of tools from stdio MCP server"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "npx"
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      mcp_method: "tools/list"
+      timeout: "30s"
+    validate:
+      - json: "$.tools"
+        type: "array"
+    show_response: true
+
+  - name: "List Resources"
+    description: "Get list of file resources"
+    request:
+      protocol: "mcp"
+      mcp_transport: "stdio"
+      mcp_command: "npx"
+      mcp_args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "/tmp"
+      mcp_method: "resources/list"
+      timeout: "30s"
+    validate:
+      - json: "$.resources"
+        type: "array"
+    show_response: true
+
