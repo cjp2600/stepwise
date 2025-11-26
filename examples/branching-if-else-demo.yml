@@ -1,0 +1,98 @@
+name: "Branching If-Else Demo"
+version: "1.0"
+description: "Demonstrates if/then/else branching functionality"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+
+steps:
+  - name: "Get User"
+    description: "Fetch user data to determine status"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+      - json: "$.id"
+        type: "number"
+    capture:
+      user_id: "$.id"
+      user_name: "$.name"
+      user_email: "$.email"
+
+  - name: "Branch Based on User ID"
+    description: "Execute different flows based on user ID"
+    if: "{{user_id}} > 5"
+    then:
+      - name: "High ID User Flow"
+        description: "This branch executes for users with ID > 5"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts?userId={{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+          - json: "$"
+            type: "array"
+        capture:
+          posts_count: "$.length"
+        print: "User {{user_name}} has high ID ({{user_id}}) and {{posts_count}} posts"
+    else:
+      - name: "Low ID User Flow"
+        description: "This branch executes for users with ID <= 5"
+        request:
+          method: "GET"
+          url: "{{base_url}}/albums?userId={{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+          - json: "$"
+            type: "array"
+        capture:
+          albums_count: "$.length"
+        print: "User {{user_name}} has low ID ({{user_id}}) and {{albums_count}} albums"
+
+  - name: "Branch Based on String Comparison"
+    description: "Execute different flows based on email domain"
+    if: "{{user_email}} == 'Sincere@april.biz'"
+    then:
+      - name: "Specific Email Flow"
+        description: "This branch executes for specific email"
+        print: "User has specific email: {{user_email}}"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/{{user_id}}/todos"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+    else:
+      - name: "Other Email Flow"
+        description: "This branch executes for other emails"
+        print: "User has other email: {{user_email}}"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/{{user_id}}/posts"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+
+  - name: "Branch with Logical Operators"
+    description: "Demonstrates logical AND operator"
+    if: "{{user_id}} > 0 && {{user_id}} < 10"
+    then:
+      - name: "Valid ID Range Flow"
+        description: "This branch executes for IDs between 1 and 9"
+        print: "User ID {{user_id}} is in valid range (1-9)"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/{{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+    else:
+      - name: "Out of Range Flow"
+        description: "This branch executes for IDs outside range"
+        print: "User ID {{user_id}} is out of valid range"
+

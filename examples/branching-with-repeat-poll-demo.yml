@@ -1,0 +1,141 @@
+name: "Branching with Repeat and Poll Demo"
+version: "1.0"
+description: "Demonstrates repeat and poll inside branching blocks"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+
+steps:
+  - name: "Get User"
+    description: "Fetch user data"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+    capture:
+      user_id: "$.id"
+      user_name: "$.name"
+
+  - name: "Branch with Repeat Inside"
+    description: "Repeat inside if/then/else branch"
+    if: "{{user_id}} > 0"
+    then:
+      - name: "Repeated Step in Then Branch"
+        description: "This step repeats 3 times"
+        repeat:
+          count: 3
+          delay: "100ms"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/{{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+        print: "✓ Repeated step in THEN branch (iteration {{iteration}})"
+    else:
+      - name: "Single Step in Else Branch"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/{{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+        print: "✓ Single step in ELSE branch"
+
+  - name: "Branch with Poll Inside"
+    description: "Poll inside branches"
+    branches:
+      - condition: "{{user_id}} == 1"
+        steps:
+          - name: "Polling Step in Branch 1"
+            description: "Poll until status is ready (will succeed immediately)"
+            poll:
+              max_attempts: 5
+              interval: "500ms"
+              until:
+                - status: 200
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+            print: "✓ Polling completed in branch 1"
+        priority: 10
+      
+      - condition: "true"
+        steps:
+          - name: "Regular Step in Default Branch"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+            print: "✓ Regular step in default branch"
+        priority: 1
+
+  - name: "Nested Branching with Repeat"
+    description: "Nested branching with repeat inside"
+    if: "{{user_id}} > 0"
+    then:
+      - name: "Inner Branch with Repeat"
+        if: "{{user_id}} == 1"
+        then:
+          - name: "Nested Then with Repeat"
+            repeat:
+              count: 2
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/1"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+            print: "✓ Nested THEN with repeat (iteration {{iteration}})"
+        else:
+          - name: "Nested Else with Repeat"
+            repeat:
+              count: 2
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+            print: "✓ Nested ELSE with repeat (iteration {{iteration}})"
+    else:
+      - name: "Outer Else"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/1"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+        print: "✓ Outer ELSE"
+
+  - name: "Branch with Use and Repeat"
+    description: "Use component with repeat inside branch"
+    if: "{{user_id}} == 1"
+    then:
+      - name: "Use Component with Repeat"
+        use: "get-user"
+        variables:
+          user_id: 1
+        repeat:
+          count: 2
+          delay: "200ms"
+        validate:
+          - status: 200
+        print: "✓ Use component with repeat in THEN (iteration {{iteration}})"
+    else:
+      - name: "Use Component Single"
+        use: "get-user"
+        variables:
+          user_id: "{{user_id}}"
+        validate:
+          - status: 200
+        print: "✓ Use component single in ELSE"
+

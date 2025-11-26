@@ -1,0 +1,124 @@
+name: "Branching with Use Demo"
+version: "1.0"
+description: "Demonstrates using components (use) inside branching blocks"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+
+imports:
+  - path: "components/get-user-by-id.yml"
+    alias: "get-user"
+
+steps:
+  - name: "Get User Data"
+    description: "Fetch user data using component"
+    use: "get-user"
+    variables:
+      user_id: 1
+    capture:
+      user_id: "$.id"
+      user_name: "$.name"
+      user_email: "$.email"
+
+  - name: "Branch with Use Component"
+    description: "Use component inside if/then/else branch"
+    if: "{{user_id}} > 5"
+    then:
+      - name: "High ID - Use Component"
+        description: "Use component in then branch"
+        use: "get-user"
+        variables:
+          user_id: "{{user_id}}"
+        validate:
+          - status: 200
+          - json: "$.id"
+            equals: "{{user_id}}"
+        print: "✓ THEN branch: Used component for user ID {{user_id}}"
+    else:
+      - name: "Low ID - Use Component"
+        description: "Use component in else branch"
+        use: "get-user"
+        variables:
+          user_id: "{{user_id}}"
+        validate:
+          - status: 200
+          - json: "$.id"
+            equals: "{{user_id}}"
+        print: "✓ ELSE branch: Used component for user ID {{user_id}}"
+
+  - name: "Branch with Multiple Use Components"
+    description: "Use components inside branches"
+    branches:
+      - condition: "{{user_id}} == 1"
+        steps:
+          - name: "Admin User - Component 1"
+            use: "get-user"
+            variables:
+              user_id: 1
+            validate:
+              - status: 200
+            print: "✓ Branch 1: Admin user component executed"
+          
+          - name: "Admin User - Component 2"
+            use: "get-user"
+            variables:
+              user_id: 2
+            validate:
+              - status: 200
+            print: "✓ Branch 1: Second component executed"
+        priority: 10
+      
+      - condition: "{{user_id}} > 1 && {{user_id}} < 10"
+        steps:
+          - name: "Regular User - Component"
+            use: "get-user"
+            variables:
+              user_id: "{{user_id}}"
+            validate:
+              - status: 200
+            print: "✓ Branch 2: Regular user component executed"
+        priority: 5
+      
+      - condition: "true"
+        steps:
+          - name: "Default - Component"
+            use: "get-user"
+            variables:
+              user_id: "{{user_id}}"
+            validate:
+              - status: 200
+            print: "✓ Default branch: Component executed"
+        priority: 1
+
+  - name: "Nested Branching with Use"
+    description: "Nested branching with use components"
+    if: "{{user_id}} > 0"
+    then:
+      - name: "Inner Branch with Use"
+        if: "{{user_id}} == 1"
+        then:
+          - name: "Nested Then - Use Component"
+            use: "get-user"
+            variables:
+              user_id: 1
+            validate:
+              - status: 200
+            print: "✓ Nested THEN: Component executed"
+        else:
+          - name: "Nested Else - Use Component"
+            use: "get-user"
+            variables:
+              user_id: "{{user_id}}"
+            validate:
+              - status: 200
+            print: "✓ Nested ELSE: Component executed"
+    else:
+      - name: "Outer Else - Use Component"
+        use: "get-user"
+        variables:
+          user_id: 1
+        validate:
+          - status: 200
+        print: "✓ Outer ELSE: Component executed"
+

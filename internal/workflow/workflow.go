@@ -54,6 +54,13 @@ type StepGroup struct {
 	Groups      []StepGroup `yaml:"groups,omitempty" json:"groups,omitempty"`
 }
 
+// Branch represents a conditional branch with steps
+type Branch struct {
+	Condition string `yaml:"condition" json:"condition"`                   // Условие ветки
+	Steps     []Step `yaml:"steps" json:"steps"`                           // Шаги ветки
+	Priority  int    `yaml:"priority,omitempty" json:"priority,omitempty"` // Приоритет (опционально, для сортировки)
+}
+
 // Step represents a single test step
 type Step struct {
 	Name         string                      `yaml:"name" json:"name"`
@@ -72,6 +79,11 @@ type Step struct {
 	Wait         string                      `yaml:"wait,omitempty" json:"wait,omitempty"`           // Новое поле для задержки
 	Print        string                      `yaml:"print,omitempty" json:"print,omitempty"`         // Новое поле для вывода
 	Variables    map[string]interface{}      `yaml:"variables,omitempty" json:"variables,omitempty"` // Переменные для переопределения в use
+	// Branching fields
+	If       string   `yaml:"if,omitempty" json:"if,omitempty"`             // Условие для if-then-else
+	Then     []Step   `yaml:"then,omitempty" json:"then,omitempty"`         // Шаги для then ветки
+	Else     []Step   `yaml:"else,omitempty" json:"else,omitempty"`         // Шаги для else ветки
+	Branches []Branch `yaml:"branches,omitempty" json:"branches,omitempty"` // Массив веток для множественного ветвления
 }
 
 // RepeatConfig represents configuration for repeating a step
@@ -174,6 +186,7 @@ type Executor struct {
 	varManager       *variables.Manager
 	progressCallback ProgressCallback
 	failFast         bool
+	componentMap     map[string]StepWithVars // Component map for use steps
 }
 
 // SetProgressCallback sets the progress callback function
@@ -263,7 +276,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	e.initializeVariables(wf.Variables)
 
 	// Собираем карту компонент по имени (только step-компоненты)
-	componentMap := make(map[string]StepWithVars)
+	e.componentMap = make(map[string]StepWithVars)
 	// Получаем директорию workflow-файла для корректного поиска компонентов
 	workflowDir := ""
 	if wf != nil && wf.SourceFile != "" {
@@ -291,7 +304,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 			if componentName == "" {
 				componentName = component.Name
 			}
-			componentMap[componentName] = StepWithVars{
+			e.componentMap[componentName] = StepWithVars{
 				Step:      component.Steps[0],
 				Variables: vars,
 			}
@@ -299,8 +312,8 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 	}
 
 	// DEBUG: выводим все ключи componentMap перед выполнением шагов
-	componentKeys := make([]string, 0, len(componentMap))
-	for k := range componentMap {
+	componentKeys := make([]string, 0, len(e.componentMap))
+	for k := range e.componentMap {
 		componentKeys = append(componentKeys, k)
 	}
 	e.logger.Info("[DEBUG] Available componentMap keys", "keys", componentKeys)
@@ -310,7 +323,7 @@ func (e *Executor) Execute(wf *Workflow) ([]TestResult, error) {
 
 	for stepIndex, step := range wf.Steps {
 		if step.Use != "" {
-			if comp, ok := componentMap[step.Use]; ok {
+			if comp, ok := e.componentMap[step.Use]; ok {
 				mergedStep := comp.Step
 				if step.Capture != nil {
 					mergedStep.Capture = step.Capture
@@ -624,16 +637,26 @@ func (e *Executor) executeGroupParallel(group *StepGroup, groupResult *GroupResu
 	return nil
 }
 
-// evaluateCondition evaluates a condition expression
+// evaluateCondition evaluates a condition expression with support for operators
 func (e *Executor) evaluateCondition(condition string) bool {
-	// Simple condition evaluation - can be extended for more complex logic
-	// For now, we'll support basic variable checks
-	if strings.HasPrefix(condition, "{{") && strings.HasSuffix(condition, "}}") {
-		// Extract variable name
-		varName := strings.TrimSpace(condition[2 : len(condition)-2])
-		value, exists := e.varManager.Get(varName)
+	if condition == "" {
+		return true
+	}
 
-		// Check if variable exists and has a truthy value
+	// Substitute variables first
+	substituted, err := e.varManager.Substitute(condition)
+	if err != nil {
+		e.logger.Warn("Failed to substitute variables in condition", "condition", condition, "error", err)
+		return false
+	}
+
+	// Trim whitespace
+	substituted = strings.TrimSpace(substituted)
+
+	// Handle simple variable check (backward compatibility)
+	if strings.HasPrefix(substituted, "{{") && strings.HasSuffix(substituted, "}}") {
+		varName := strings.TrimSpace(substituted[2 : len(substituted)-2])
+		value, exists := e.varManager.Get(varName)
 		if exists && value != nil {
 			switch v := value.(type) {
 			case bool:
@@ -649,8 +672,190 @@ func (e *Executor) evaluateCondition(condition string) bool {
 		return false
 	}
 
-	// For now, assume condition is true if it's not a variable reference
-	return true
+	// Parse and evaluate expression with operators
+	return e.evaluateExpression(substituted)
+}
+
+// evaluateExpression evaluates a boolean expression with operators
+func (e *Executor) evaluateExpression(expr string) bool {
+	expr = strings.TrimSpace(expr)
+
+	// Handle logical operators (&&, ||)
+	if strings.Contains(expr, "&&") {
+		parts := strings.Split(expr, "&&")
+		for _, part := range parts {
+			if !e.evaluateExpression(strings.TrimSpace(part)) {
+				return false
+			}
+		}
+		return true
+	}
+
+	if strings.Contains(expr, "||") {
+		parts := strings.Split(expr, "||")
+		for _, part := range parts {
+			if e.evaluateExpression(strings.TrimSpace(part)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Handle negation
+	if strings.HasPrefix(expr, "!") {
+		return !e.evaluateExpression(strings.TrimSpace(expr[1:]))
+	}
+
+	// Handle comparison operators
+	operators := []string{"==", "!=", ">=", "<=", ">", "<"}
+	for _, op := range operators {
+		if strings.Contains(expr, op) {
+			parts := strings.SplitN(expr, op, 2)
+			if len(parts) == 2 {
+				left := strings.TrimSpace(parts[0])
+				right := strings.TrimSpace(parts[1])
+				return e.compareValues(left, right, op)
+			}
+		}
+	}
+
+	// If no operator found, treat as boolean value
+	return e.isTruthy(expr)
+}
+
+// compareValues compares two values using the specified operator
+func (e *Executor) compareValues(left, right, operator string) bool {
+	// Get left value (could be variable or literal)
+	leftVal := e.getValue(left)
+	rightVal := e.getValue(right)
+
+	// Try numeric comparison first
+	leftNum, leftOk := e.toNumber(leftVal)
+	rightNum, rightOk := e.toNumber(rightVal)
+
+	if leftOk && rightOk {
+		switch operator {
+		case "==":
+			return leftNum == rightNum
+		case "!=":
+			return leftNum != rightNum
+		case ">":
+			return leftNum > rightNum
+		case "<":
+			return leftNum < rightNum
+		case ">=":
+			return leftNum >= rightNum
+		case "<=":
+			return leftNum <= rightNum
+		}
+	}
+
+	// String comparison
+	leftStr := fmt.Sprintf("%v", leftVal)
+	rightStr := fmt.Sprintf("%v", rightVal)
+
+	// Remove quotes if present
+	leftStr = strings.Trim(leftStr, "\"'")
+	rightStr = strings.Trim(rightStr, "\"'")
+
+	switch operator {
+	case "==":
+		return leftStr == rightStr
+	case "!=":
+		return leftStr != rightStr
+	case ">":
+		return leftStr > rightStr
+	case "<":
+		return leftStr < rightStr
+	case ">=":
+		return leftStr >= rightStr
+	case "<=":
+		return leftStr <= rightStr
+	}
+
+	return false
+}
+
+// getValue gets a value from variable or returns as literal
+func (e *Executor) getValue(expr string) interface{} {
+	expr = strings.TrimSpace(expr)
+
+	// Check if it's a variable reference
+	if strings.HasPrefix(expr, "{{") && strings.HasSuffix(expr, "}}") {
+		varName := strings.TrimSpace(expr[2 : len(expr)-2])
+		if value, exists := e.varManager.Get(varName); exists {
+			return value
+		}
+		return nil
+	}
+
+	// Try to parse as number
+	if num, err := strconv.ParseFloat(expr, 64); err == nil {
+		return num
+	}
+
+	// Return as string (remove quotes if present)
+	return strings.Trim(expr, "\"'")
+}
+
+// toNumber converts a value to float64
+func (e *Executor) toNumber(value interface{}) (float64, bool) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case float32:
+		return float64(v), true
+	case float64:
+		return v, true
+	case string:
+		if num, err := strconv.ParseFloat(v, 64); err == nil {
+			return num, true
+		}
+	}
+	return 0, false
+}
+
+// isTruthy checks if a value is truthy
+func (e *Executor) isTruthy(expr string) bool {
+	// Try to get as variable first
+	if strings.HasPrefix(expr, "{{") && strings.HasSuffix(expr, "}}") {
+		varName := strings.TrimSpace(expr[2 : len(expr)-2])
+		value, exists := e.varManager.Get(varName)
+		if exists {
+			switch v := value.(type) {
+			case bool:
+				return v
+			case string:
+				return v != "" && v != "false" && v != "0"
+			case int, int32, int64, float32, float64:
+				return v != 0
+			default:
+				return value != nil
+			}
+		}
+		return false
+	}
+
+	// Check string literals
+	expr = strings.Trim(expr, "\"'")
+	if expr == "true" || expr == "1" {
+		return true
+	}
+	if expr == "false" || expr == "0" || expr == "" {
+		return false
+	}
+
+	// Try as number
+	if num, err := strconv.ParseFloat(expr, 64); err == nil {
+		return num != 0
+	}
+
+	// Non-empty string is truthy
+	return expr != ""
 }
 
 // executeStep executes a single step with retry logic
@@ -689,10 +894,8 @@ func (e *Executor) executeStep(step *Step, result *TestResult) error {
 		return nil
 	}
 
-	// Check if this step has polling configuration
-	if step.Poll != nil {
-		return e.executeStepWithPoll(step, result, startTime)
-	}
+	// Note: Poll is now handled in executeStepNormal, not here
+	// This function only handles the actual request execution
 
 	var lastError error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -1197,6 +1400,11 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 			substitutedReq.Protocol = "http"
 		}
 
+		// Note: For polling, we need to execute the step normally (which may include branching)
+		// But polling should execute the actual request, not branching
+		// So we check for branching before polling, and if there's branching, we don't poll
+		// Instead, we execute the branching, and each branch can have its own poll
+
 		// Execute request based on protocol
 		var httpResponse *httpclient.Response
 		var grpcResponse *grpcclient.Response
@@ -1669,10 +1877,48 @@ func (e *Executor) executeStepWithPoll(step *Step, result *TestResult, startTime
 
 // executeStepWithRepeat executes a step with repeat configuration
 func (e *Executor) executeStepWithRepeat(step *Step, result *TestResult) error {
-	if step.Repeat == nil {
-		// No repeat configuration, execute normally
-		return e.executeStep(step, result)
+	// Check for repeat first (repeat can contain branching)
+	if step.Repeat != nil {
+		return e.executeStepWithRepeatConfig(step, result)
 	}
+
+	// Check for branching (branching can contain repeat/poll)
+	if step.If != "" || len(step.Branches) > 0 {
+		return e.executeStepWithBranches(step, result)
+	}
+
+	// No repeat or branching, check for poll or normal execution
+	return e.executeStepNormal(step, result)
+}
+
+// executeStepNormal handles a single step execution, checking for use, repeat, poll, then branching, then normal execution
+func (e *Executor) executeStepNormal(step *Step, result *TestResult) error {
+	// Check for use component first (use can contain repeat/poll/branching)
+	if step.Use != "" {
+		return e.executeBranchStepWithUse(step, result)
+	}
+
+	// Check for repeat (repeat can contain poll/branching)
+	if step.Repeat != nil {
+		return e.executeStepWithRepeatConfig(step, result)
+	}
+
+	// Check for poll (poll executes requests, not branching - branching is checked before poll)
+	if step.Poll != nil {
+		return e.executeStepWithPoll(step, result, time.Now())
+	}
+
+	// Check for branching (branching can contain repeat/poll/use)
+	if step.If != "" || len(step.Branches) > 0 {
+		return e.executeStepWithBranches(step, result)
+	}
+
+	// Normal step execution
+	return e.executeStep(step, result)
+}
+
+// executeStepWithRepeatConfig executes a step with repeat configuration
+func (e *Executor) executeStepWithRepeatConfig(step *Step, result *TestResult) error {
 
 	repeatConfig := step.Repeat
 	result.RepeatCount = repeatConfig.Count
@@ -1702,6 +1948,8 @@ func (e *Executor) executeStepRepeatSequential(step *Step, result *TestResult, r
 
 		// Create a copy of the step for this iteration
 		stepCopy := *step
+		// Clear repeat to avoid infinite recursion (repeat is already being handled)
+		stepCopy.Repeat = nil
 
 		// Apply repeat variables if specified
 		if repeatConfig.Variables != nil || true {
@@ -1742,7 +1990,7 @@ func (e *Executor) executeStepRepeatSequential(step *Step, result *TestResult, r
 			CapturedData: make(map[string]interface{}),
 		}
 
-		err := e.executeStep(&stepCopy, iterationResult)
+		err := e.executeStepNormal(&stepCopy, iterationResult)
 		if err != nil {
 			iterationResult.Status = "failed"
 			iterationResult.Error = err.Error()
@@ -1795,6 +2043,8 @@ func (e *Executor) executeStepRepeatParallel(step *Step, result *TestResult, rep
 
 			// Create a copy of the step for this iteration
 			stepCopy := *step
+			// Clear repeat to avoid infinite recursion (repeat is already being handled)
+			stepCopy.Repeat = nil
 
 			// Apply repeat variables if specified
 			if repeatConfig.Variables != nil {
@@ -1832,13 +2082,13 @@ func (e *Executor) executeStepRepeatParallel(step *Step, result *TestResult, rep
 				}()
 			}
 
-			// Execute the step
+			// Execute the step (which may contain branching or poll)
 			iterationResult := &TestResult{
 				Name:         fmt.Sprintf("%s (iteration %d)", step.Name, iteration+1),
 				CapturedData: make(map[string]interface{}),
 			}
 
-			err := e.executeStep(&stepCopy, iterationResult)
+			err := e.executeStepNormal(&stepCopy, iterationResult)
 			if err != nil {
 				iterationResult.Status = "failed"
 				iterationResult.Error = err.Error()
@@ -1873,6 +2123,269 @@ func (e *Executor) executeStepRepeatParallel(step *Step, result *TestResult, rep
 	}
 
 	return nil
+}
+
+// executeBranchStepWithUse executes a step with use component support (for branches)
+func (e *Executor) executeBranchStepWithUse(step *Step, result *TestResult) error {
+	// Handle use component
+	if step.Use != "" {
+		if comp, ok := e.componentMap[step.Use]; ok {
+			mergedStep := comp.Step
+			if step.Capture != nil {
+				mergedStep.Capture = step.Capture
+			}
+			if len(step.Validate) > 0 {
+				mergedStep.Validate = step.Validate
+			}
+			if step.Name != "" {
+				mergedStep.Name = step.Name
+			}
+			if step.Description != "" {
+				mergedStep.Description = step.Description
+			}
+			if step.Repeat != nil {
+				mergedStep.Repeat = step.Repeat
+			}
+			// Copy Poll configuration
+			if step.Poll != nil {
+				mergedStep.Poll = step.Poll
+			}
+			// Copy ShowResponse
+			if step.ShowResponse {
+				mergedStep.ShowResponse = true
+			}
+			// Copy timeout
+			if step.Request.Timeout != "" {
+				mergedStep.Request.Timeout = step.Request.Timeout
+			} else if step.Timeout != "" {
+				mergedStep.Request.Timeout = step.Timeout
+			}
+			// Copy branching fields
+			if step.If != "" {
+				mergedStep.If = step.If
+				mergedStep.Then = step.Then
+				mergedStep.Else = step.Else
+			}
+			if len(step.Branches) > 0 {
+				mergedStep.Branches = step.Branches
+			}
+			e.logger.Info("[COMPONENT] Executing use step in branch", "use", step.Use, "step", mergedStep.Name)
+			// Initialize component variables first
+			e.initializeVariables(comp.Variables)
+			// Then apply step-level variable overrides (with substitution)
+			if len(step.Variables) > 0 {
+				e.logger.Debug("[COMPONENT] Applying step-level variable overrides", "variables", step.Variables)
+				// Substitute variables in step.Variables before applying
+				substitutedVars := make(map[string]interface{})
+				for k, v := range step.Variables {
+					if strVal, ok := v.(string); ok {
+						substituted, err := e.varManager.Substitute(strVal)
+						if err == nil {
+							substitutedVars[k] = substituted
+						} else {
+							substitutedVars[k] = v
+						}
+					} else {
+						substitutedVars[k] = v
+					}
+				}
+				e.initializeVariables(substitutedVars)
+			}
+			return e.executeStepWithRepeat(&mergedStep, result)
+		} else {
+			e.logger.Error("Component not found for use step in branch", "use", step.Use)
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("Component not found for use: %s", step.Use)
+			return fmt.Errorf("component not found for use: %s", step.Use)
+		}
+	}
+	// No use, execute normally (which may include repeat/poll/branching)
+	return e.executeStepNormal(step, result)
+}
+
+// executeStepWithBranches executes a step with branching logic (if/then/else or branches)
+func (e *Executor) executeStepWithBranches(step *Step, result *TestResult) error {
+	startTime := time.Now()
+	e.logger.Info("Executing step with branching", "step", step.Name)
+
+	// Handle if/then/else pattern
+	if step.If != "" {
+		conditionMet := e.evaluateCondition(step.If)
+		e.logger.Debug("Evaluated if condition", "step", step.Name, "condition", step.If, "result", conditionMet)
+
+		var stepsToExecute []Step
+		if conditionMet {
+			stepsToExecute = step.Then
+			e.logger.Info("Executing 'then' branch", "step", step.Name, "steps_count", len(stepsToExecute))
+		} else {
+			stepsToExecute = step.Else
+			e.logger.Info("Executing 'else' branch", "step", step.Name, "steps_count", len(stepsToExecute))
+		}
+
+		// Execute steps in the selected branch
+		var branchResults []TestResult
+		for _, branchStep := range stepsToExecute {
+			branchResult := &TestResult{
+				Name:         fmt.Sprintf("%s.%s", step.Name, branchStep.Name),
+				Status:       "pending",
+				CapturedData: make(map[string]interface{}),
+			}
+
+			// Check condition if specified
+			if branchStep.Condition != "" {
+				if !e.evaluateCondition(branchStep.Condition) {
+					e.logger.Info("Skipping branch step due to condition", "step", branchStep.Name, "condition", branchStep.Condition)
+					branchResult.Status = "skipped"
+					branchResults = append(branchResults, *branchResult)
+					continue
+				}
+			}
+
+			// Execute step (supports use, repeat, poll, and nested branching)
+			if err := e.executeStepNormal(&branchStep, branchResult); err != nil {
+				branchResult.Status = "failed"
+				branchResult.Error = err.Error()
+				e.logger.Error("Branch step execution failed", "step", branchStep.Name, "error", err)
+			} else {
+				branchResult.Status = "passed"
+			}
+
+			branchResults = append(branchResults, *branchResult)
+
+			// Check fail-fast mode
+			if e.failFast && branchResult.Status == "failed" {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("branch step failed: %s", branchResult.Error)
+				result.Duration = time.Since(startTime)
+				return fmt.Errorf("execution stopped at first failure (branch step: %s)", branchStep.Name)
+			}
+		}
+
+		// Determine overall result
+		allPassed := true
+		for _, br := range branchResults {
+			if br.Status == "failed" {
+				allPassed = false
+				break
+			}
+		}
+
+		if allPassed {
+			result.Status = "passed"
+		} else {
+			result.Status = "failed"
+			failedSteps := []string{}
+			for _, br := range branchResults {
+				if br.Status == "failed" {
+					failedSteps = append(failedSteps, br.Name)
+				}
+			}
+			result.Error = fmt.Sprintf("branch steps failed: %s", strings.Join(failedSteps, ", "))
+		}
+
+		result.Duration = time.Since(startTime)
+		return nil
+	}
+
+	// Handle branches pattern (multiple conditional branches)
+	if len(step.Branches) > 0 {
+		// Sort branches by priority if specified (higher priority first)
+		sortedBranches := make([]Branch, len(step.Branches))
+		copy(sortedBranches, step.Branches)
+		for i := 0; i < len(sortedBranches)-1; i++ {
+			for j := i + 1; j < len(sortedBranches); j++ {
+				if sortedBranches[i].Priority < sortedBranches[j].Priority {
+					sortedBranches[i], sortedBranches[j] = sortedBranches[j], sortedBranches[i]
+				}
+			}
+		}
+
+		// Find first matching branch
+		var selectedBranch *Branch
+		for i := range sortedBranches {
+			branch := &sortedBranches[i]
+			if e.evaluateCondition(branch.Condition) {
+				selectedBranch = branch
+				e.logger.Info("Selected branch", "step", step.Name, "condition", branch.Condition, "steps_count", len(branch.Steps))
+				break
+			}
+		}
+
+		if selectedBranch == nil {
+			e.logger.Warn("No branch condition matched", "step", step.Name)
+			result.Status = "failed"
+			result.Error = "no branch condition matched"
+			result.Duration = time.Since(startTime)
+			return fmt.Errorf("no branch condition matched for step: %s", step.Name)
+		}
+
+		// Execute steps in the selected branch
+		var branchResults []TestResult
+		for _, branchStep := range selectedBranch.Steps {
+			branchResult := &TestResult{
+				Name:         fmt.Sprintf("%s.%s", step.Name, branchStep.Name),
+				Status:       "pending",
+				CapturedData: make(map[string]interface{}),
+			}
+
+			// Check condition if specified
+			if branchStep.Condition != "" {
+				if !e.evaluateCondition(branchStep.Condition) {
+					e.logger.Info("Skipping branch step due to condition", "step", branchStep.Name, "condition", branchStep.Condition)
+					branchResult.Status = "skipped"
+					branchResults = append(branchResults, *branchResult)
+					continue
+				}
+			}
+
+			// Execute step (supports use, repeat, poll, and nested branching)
+			if err := e.executeStepNormal(&branchStep, branchResult); err != nil {
+				branchResult.Status = "failed"
+				branchResult.Error = err.Error()
+				e.logger.Error("Branch step execution failed", "step", branchStep.Name, "error", err)
+			} else {
+				branchResult.Status = "passed"
+			}
+
+			branchResults = append(branchResults, *branchResult)
+
+			// Check fail-fast mode
+			if e.failFast && branchResult.Status == "failed" {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("branch step failed: %s", branchResult.Error)
+				result.Duration = time.Since(startTime)
+				return fmt.Errorf("execution stopped at first failure (branch step: %s)", branchStep.Name)
+			}
+		}
+
+		// Determine overall result
+		allPassed := true
+		for _, br := range branchResults {
+			if br.Status == "failed" {
+				allPassed = false
+				break
+			}
+		}
+
+		if allPassed {
+			result.Status = "passed"
+		} else {
+			result.Status = "failed"
+			failedSteps := []string{}
+			for _, br := range branchResults {
+				if br.Status == "failed" {
+					failedSteps = append(failedSteps, br.Name)
+				}
+			}
+			result.Error = fmt.Sprintf("branch steps failed: %s", strings.Join(failedSteps, ", "))
+		}
+
+		result.Duration = time.Since(startTime)
+		return nil
+	}
+
+	// No branching found, execute normally
+	return e.executeStep(step, result)
 }
 
 // initializeVariables initializes the variable manager with workflow variables

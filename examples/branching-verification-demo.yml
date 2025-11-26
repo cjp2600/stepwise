@@ -1,0 +1,133 @@
+name: "Branching Verification Demo"
+version: "1.0"
+description: "Verifies that branching works correctly with different conditions"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+  test_user_id: 1
+
+steps:
+  - name: "Setup Test Variables"
+    description: "Set up variables for testing"
+    print: "Testing branching with user_id = {{test_user_id}}"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/{{test_user_id}}"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+    capture:
+      user_id: "$.id"
+      user_name: "$.name"
+
+  - name: "Test If-Else: High ID"
+    description: "Test if/then/else with high ID condition"
+    if: "{{user_id}} > 5"
+    then:
+      - name: "High ID Branch Executed"
+        print: "✓ THEN branch executed (user_id {{user_id}} > 5)"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts?userId={{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+    else:
+      - name: "Low ID Branch Executed"
+        print: "✓ ELSE branch executed (user_id {{user_id}} <= 5)"
+        request:
+          method: "GET"
+          url: "{{base_url}}/albums?userId={{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+
+  - name: "Test Branches: Multiple Conditions"
+    description: "Test branches with multiple conditions"
+    branches:
+      - condition: "{{user_id}} == 1"
+        steps:
+          - name: "Branch 1 Executed (ID == 1)"
+            print: "✓ Branch 1 executed: user_id == 1"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}/posts"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+        priority: 10
+      
+      - condition: "{{user_id}} > 1 && {{user_id}} < 5"
+        steps:
+          - name: "Branch 2 Executed (1 < ID < 5)"
+            print: "✓ Branch 2 executed: 1 < user_id < 5"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}/albums"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+        priority: 5
+      
+      - condition: "true"
+        steps:
+          - name: "Default Branch Executed"
+            print: "✓ Default branch executed (fallback)"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+        priority: 1
+
+  - name: "Test Logical Operators"
+    description: "Test logical AND and OR operators"
+    if: "{{user_id}} > 0 && {{user_id}} < 10"
+    then:
+      - name: "AND Condition Met"
+        print: "✓ AND condition met: {{user_id}} > 0 && {{user_id}} < 10"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/{{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+    else:
+      - name: "AND Condition Not Met"
+        print: "✗ AND condition not met"
+        request:
+          method: "GET"
+          url: "{{base_url}}/users/{{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+
+  - name: "Test Comparison Operators"
+    description: "Test various comparison operators"
+    branches:
+      - condition: "{{user_id}} >= 1"
+        steps:
+          - name: "Greater or Equal Test"
+            print: "✓ >= operator works: {{user_id}} >= 1"
+        priority: 10
+      
+      - condition: "{{user_id}} <= 10"
+        steps:
+          - name: "Less or Equal Test"
+            print: "✓ <= operator works: {{user_id}} <= 10"
+        priority: 5
+      
+      - condition: "{{user_id}} != 0"
+        steps:
+          - name: "Not Equal Test"
+            print: "✓ != operator works: {{user_id}} != 0"
+        priority: 3
+      
+      - condition: "true"
+        steps:
+          - name: "Fallback"
+            print: "Fallback executed"
+        priority: 1
+

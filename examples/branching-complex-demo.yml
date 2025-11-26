@@ -1,0 +1,127 @@
+name: "Complex Branching Demo"
+version: "1.0"
+description: "Demonstrates complex branching scenarios with nested conditions"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+
+steps:
+  - name: "Initialize Test Data"
+    description: "Set up test variables"
+    print: "Starting complex branching demo"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+    capture:
+      user_id: "$.id"
+      user_name: "$.name"
+      user_email: "$.email"
+
+  - name: "Multi-Level Branching"
+    description: "Demonstrates nested branching logic"
+    if: "{{user_id}} > 0"
+    then:
+      - name: "Get User Posts"
+        description: "Fetch user posts"
+        request:
+          method: "GET"
+          url: "{{base_url}}/posts?userId={{user_id}}"
+          timeout: "{{timeout}}"
+        validate:
+          - status: 200
+        capture:
+          posts_count: "$.length"
+      
+      - name: "Branch Based on Posts Count"
+        description: "Nested branching based on posts count"
+        if: "{{posts_count}} > 5"
+        then:
+          - name: "High Activity User"
+            description: "User has many posts"
+            print: "User {{user_name}} is highly active with {{posts_count}} posts"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}/albums"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+        else:
+          - name: "Low Activity User"
+            description: "User has few posts"
+            print: "User {{user_name}} has {{posts_count}} posts"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}/todos"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+    else:
+      - name: "Invalid User ID"
+        description: "Handle invalid user ID"
+        print: "Invalid user ID: {{user_id}}"
+
+  - name: "Branching with Comparison Operators"
+    description: "Demonstrates various comparison operators"
+    branches:
+      - condition: "{{user_id}} >= 10"
+        steps:
+          - name: "High ID (>= 10)"
+            print: "User ID {{user_id}} is >= 10"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+      
+      - condition: "{{user_id}} <= 3"
+        steps:
+          - name: "Low ID (<= 3)"
+            print: "User ID {{user_id}} is <= 3"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+      
+      - condition: "{{user_id}} > 3 && {{user_id}} < 10"
+        steps:
+          - name: "Medium ID (3 < ID < 10)"
+            print: "User ID {{user_id}} is between 3 and 10"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+      
+      - condition: "true"
+        steps:
+          - name: "Fallback"
+            print: "Fallback for user ID {{user_id}}"
+
+  - name: "Branching with String Operations"
+    description: "Demonstrates string comparison in branches"
+    if: "{{user_email}} != ''"
+    then:
+      - name: "Email-Based Branching"
+        description: "Branch based on email domain"
+        branches:
+          - condition: "{{user_email}} == 'Sincere@april.biz'"
+            steps:
+              - name: "Specific Email Domain"
+                print: "User has specific email: {{user_email}}"
+          
+          - condition: "true"
+            steps:
+              - name: "Other Email"
+                print: "User has other email: {{user_email}}"
+    else:
+      - name: "No Email"
+        print: "User has no email"
+

@@ -1,0 +1,109 @@
+name: "Branching Multiple Branches Demo"
+version: "1.0"
+description: "Demonstrates multiple branches functionality"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout: "5s"
+
+steps:
+  - name: "Get User"
+    description: "Fetch user data"
+    request:
+      method: "GET"
+      url: "{{base_url}}/users/1"
+      timeout: "{{timeout}}"
+    validate:
+      - status: 200
+    capture:
+      user_id: "$.id"
+      user_name: "$.name"
+
+  - name: "Route Based on User ID"
+    description: "Multiple branches with different conditions"
+    branches:
+      - condition: "{{user_id}} == 1"
+        steps:
+          - name: "Admin User Flow"
+            description: "Special flow for user ID 1"
+            print: "Executing admin flow for user {{user_name}} (ID: {{user_id}})"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}/posts"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+            capture:
+              admin_posts: "$.length"
+        priority: 10
+      
+      - condition: "{{user_id}} > 5 && {{user_id}} < 10"
+        steps:
+          - name: "Premium User Flow"
+            description: "Flow for premium users (ID 6-9)"
+            print: "Executing premium flow for user {{user_name}} (ID: {{user_id}})"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}/albums"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+            capture:
+              premium_albums: "$.length"
+        priority: 5
+      
+      - condition: "{{user_id}} >= 10"
+        steps:
+          - name: "Standard User Flow"
+            description: "Flow for standard users (ID >= 10)"
+            print: "Executing standard flow for user {{user_name}} (ID: {{user_id}})"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}/todos"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+            capture:
+              standard_todos: "$.length"
+        priority: 3
+      
+      - condition: "true"
+        steps:
+          - name: "Default Flow"
+            description: "Default flow for any other case"
+            print: "Executing default flow for user {{user_name}} (ID: {{user_id}})"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+        priority: 1
+
+  - name: "Complex Branching with Multiple Conditions"
+    description: "Demonstrates complex branching logic"
+    branches:
+      - condition: "{{user_id}} == 1 || {{user_id}} == 2"
+        steps:
+          - name: "VIP User Flow"
+            description: "Flow for VIP users (ID 1 or 2)"
+            print: "VIP user detected: {{user_name}}"
+            request:
+              method: "GET"
+              url: "{{base_url}}/posts?userId={{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+      
+      - condition: "{{user_id}} != 1 && {{user_id}} != 2"
+        steps:
+          - name: "Regular User Flow"
+            description: "Flow for regular users"
+            print: "Regular user: {{user_name}}"
+            request:
+              method: "GET"
+              url: "{{base_url}}/users/{{user_id}}"
+              timeout: "{{timeout}}"
+            validate:
+              - status: 200
+

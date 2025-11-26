@@ -32,7 +32,7 @@ request:
 
 ### 2. Stdio
 
-Используется для запуска MCP сервера как локальной команды:
+Используется для запуска MCP сервера как локальной команды через стандартный ввод/вывод:
 
 ```yaml
 request:
@@ -43,6 +43,64 @@ request:
     - "@modelcontextprotocol/server-filesystem"
     - "/path/to/directory"
   mcp_method: "tools/list"
+```
+
+**Особенности stdio транспорта:**
+- Сервер запускается как локальный процесс
+- Коммуникация происходит через stdin/stdout
+- Не требует сетевого подключения
+- Подходит для локальных MCP серверов
+- Автоматически управляет жизненным циклом процесса
+
+**Примеры использования:**
+
+1. **NPM пакет MCP сервер:**
+```yaml
+request:
+  protocol: "mcp"
+  mcp_transport: "stdio"
+  mcp_command: "npx"
+  mcp_args:
+    - "@modelcontextprotocol/server-filesystem"
+    - "/tmp"
+  mcp_method: "tools/list"
+```
+
+2. **Python MCP сервер:**
+```yaml
+request:
+  protocol: "mcp"
+  mcp_transport: "stdio"
+  mcp_command: "python"
+  mcp_args:
+    - "-m"
+    - "mcp_server"
+    - "--config"
+    - "config.json"
+  mcp_method: "initialize"
+```
+
+3. **Go бинарный MCP сервер:**
+```yaml
+request:
+  protocol: "mcp"
+  mcp_transport: "stdio"
+  mcp_command: "./mcp-server"
+  mcp_args:
+    - "--port"
+    - "8080"
+  mcp_method: "tools/list"
+```
+
+4. **Любой исполняемый файл:**
+```yaml
+request:
+  protocol: "mcp"
+  mcp_transport: "stdio"
+  mcp_command: "/usr/local/bin/my-mcp-server"
+  mcp_args:
+    - "--verbose"
+  mcp_method: "initialize"
 ```
 
 ## Конфигурация
