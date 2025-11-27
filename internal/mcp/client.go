@@ -164,9 +164,10 @@ type ToolsCallResult struct {
 
 // Content represents content in a tool call result
 type Content struct {
-	Type string      `json:"type"`
-	Text string      `json:"text,omitempty"`
-	Data interface{} `json:"data,omitempty"`
+	Type string                 `json:"type"`
+	Text string                 `json:"text,omitempty"`
+	JSON map[string]interface{} `json:"json,omitempty"`
+	Data interface{}            `json:"data,omitempty"`
 }
 
 // ResourcesListResult represents result from resources/list method
@@ -505,7 +506,8 @@ func (t *StdioTransport) SendRequest(ctx context.Context, req *JSONRPCRequest) (
 	}
 
 	// Verify response ID matches request ID
-	if resp.ID != req.ID {
+	// JSON-RPC allows ID to be number or string, so we need to compare values properly
+	if !compareJSONRPCID(req.ID, resp.ID) {
 		return nil, fmt.Errorf("response ID mismatch: expected %v, got %v", req.ID, resp.ID)
 	}
 
@@ -599,6 +601,65 @@ func (t *HTTPTransport) Close() error {
 }
 
 // Helper methods for common MCP operations
+
+// compareJSONRPCID compares two JSON-RPC IDs, handling different numeric types
+func compareJSONRPCID(id1, id2 interface{}) bool {
+	if id1 == nil && id2 == nil {
+		return true
+	}
+	if id1 == nil || id2 == nil {
+		return false
+	}
+
+	// Convert both to comparable types
+	var v1, v2 float64
+	var s1, s2 string
+	var ok1, ok2 bool
+
+	// Try to convert to float64 (handles int, int64, float64)
+	switch val := id1.(type) {
+	case float64:
+		v1 = val
+		ok1 = true
+	case int:
+		v1 = float64(val)
+		ok1 = true
+	case int64:
+		v1 = float64(val)
+		ok1 = true
+	case string:
+		s1 = val
+		ok1 = false
+	}
+
+	switch val := id2.(type) {
+	case float64:
+		v2 = val
+		ok2 = true
+	case int:
+		v2 = float64(val)
+		ok2 = true
+	case int64:
+		v2 = float64(val)
+		ok2 = true
+	case string:
+		s2 = val
+		ok2 = false
+	}
+
+	// If both are numeric, compare as numbers
+	if ok1 && ok2 {
+		return v1 == v2
+	}
+
+	// If both are strings, compare as strings
+	if !ok1 && !ok2 {
+		return s1 == s2
+	}
+
+	// Mixed types are not equal
+	return false
+}
 
 // ListTools lists available tools
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
